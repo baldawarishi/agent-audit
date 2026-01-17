@@ -1,5 +1,7 @@
 """CLI for Claude Code archive."""
 
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -354,6 +356,110 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
     click.echo("Configuration saved.")
     click.echo(f"  Archive dir:  {cfg.archive_dir}")
     click.echo(f"  Projects dir: {cfg.projects_dir}")
+
+
+@main.command()
+@click.option(
+    "--archive-dir",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to archive directory (overrides config)",
+)
+@click.option(
+    "--project",
+    type=str,
+    default=None,
+    help="Filter to specific project",
+)
+@click.option(
+    "--since",
+    type=str,
+    default=None,
+    help="Only analyze sessions since this ISO date (e.g., 2025-01-01)",
+)
+@click.option(
+    "--patterns-only",
+    is_flag=True,
+    help="Output raw patterns as JSON (skip LLM classification)",
+)
+@click.option(
+    "--min-occurrences",
+    type=int,
+    default=3,
+    help="Minimum pattern occurrences (default: 3)",
+)
+@click.option(
+    "--min-sessions",
+    type=int,
+    default=2,
+    help="Minimum distinct sessions (default: 2)",
+)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output file path (default: {archive-dir}/analysis/patterns-{datetime}.json)",
+)
+@click.pass_context
+def analyze(
+    ctx,
+    archive_dir: Optional[Path],
+    project: Optional[str],
+    since: Optional[str],
+    patterns_only: bool,
+    min_occurrences: int,
+    min_sessions: int,
+    output: Optional[Path],
+):
+    """Analyze archived sessions for workflow patterns."""
+    from .analyzer import detect_patterns
+
+    cfg: Config = ctx.obj["config"]
+
+    if archive_dir:
+        cfg.archive_dir = archive_dir
+
+    if not cfg.db_path.exists():
+        click.echo("No archive database found. Run 'sync' first.")
+        return
+
+    db = Database(cfg.db_path)
+
+    with db:
+        click.echo("Detecting patterns...")
+        result = detect_patterns(
+            db=db,
+            min_occurrences=min_occurrences,
+            min_sessions=min_sessions,
+            project_filter=project,
+            since=since,
+        )
+
+        # Print summary
+        summary = result["summary"]
+        click.echo(f"\nAnalyzed {summary['total_sessions_analyzed']} sessions across {summary['total_projects']} projects")
+        click.echo("\nPatterns found:")
+        for pattern_type, count in summary["patterns_found"].items():
+            click.echo(f"  {pattern_type}: {count}")
+
+        if patterns_only:
+            # Determine output path
+            if output:
+                output_path = output
+            else:
+                analysis_dir = cfg.archive_dir / "analysis"
+                analysis_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                output_path = analysis_dir / f"patterns-{timestamp}.json"
+
+            # Write JSON output
+            with open(output_path, "w") as f:
+                json.dump(result, f, indent=2)
+
+            click.echo(f"\nPatterns written to: {output_path}")
+        else:
+            click.echo("\nNote: Full analysis with LLM classification requires --patterns-only=false (coming soon)")
+            click.echo("For now, use --patterns-only to output raw patterns as JSON")
 
 
 if __name__ == "__main__":
