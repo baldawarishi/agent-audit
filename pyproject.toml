@@ -1,0 +1,23 @@
+[project]
+name = "claude-code-archive"
+version = "0.1.0"
+description = "Archive Claude Code transcripts in a structured, analyzable format"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+]
+
+[project.scripts]
+claude-code-archive = "claude_code_archive.cli:main"
+
+[tool.uv]
+package = true
+dev-dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_code_archive"]
