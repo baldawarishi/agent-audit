@@ -272,14 +272,14 @@ See `docs/analyzer-design.md` for detailed implementation design.
 
 ## Phase 3: Workflow Analysis (Current)
 
-### Phase 3a: Detection & Output (no LLM)
-- [ ] Create `analyzer/` subpackage structure
-- [ ] Tool sequence detection (3-grams with Bash depth-2 normalization)
-- [ ] Prompt pattern detection (prefix + sub-section phrases)
-- [ ] File access pattern detection
-- [ ] Sequence merging for overlapping patterns
-- [ ] Pretty JSON output for `--patterns-only`
-- [ ] CLI command with configurable thresholds
+### Phase 3a: Detection & Output (no LLM) ✓
+- [x] Create `analyzer/` subpackage structure
+- [x] Tool sequence detection (3-grams with Bash depth-2 normalization)
+- [x] Prompt pattern detection (prefix + sub-section phrases)
+- [x] File access pattern detection
+- [x] Sequence merging for overlapping patterns
+- [x] Pretty JSON output for `--patterns-only`
+- [x] CLI command with configurable thresholds
 
 ### Phase 3b: LLM Classification
 - [ ] Classification prompt template with few-shot examples
