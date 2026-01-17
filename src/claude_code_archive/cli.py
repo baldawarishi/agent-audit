@@ -401,6 +401,12 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
     help="Fraction of projects for global scope (default: 0.3 = 30%%)",
 )
 @click.option(
+    "--max-patterns",
+    type=int,
+    default=50,
+    help="Maximum patterns to classify with LLM (default: 50)",
+)
+@click.option(
     "--output",
     type=click.Path(path_type=Path),
     default=None,
@@ -416,6 +422,7 @@ def analyze(
     min_occurrences: int,
     min_sessions: int,
     global_threshold: float,
+    max_patterns: int,
     output: Optional[Path],
 ):
     """Analyze archived sessions for workflow patterns."""
@@ -484,6 +491,7 @@ def analyze(
                     classify_patterns(
                         patterns_result=result,
                         global_threshold=global_threshold,
+                        max_patterns=max_patterns,
                     )
                 )
 

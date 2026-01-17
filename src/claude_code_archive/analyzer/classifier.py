@@ -68,6 +68,7 @@ def build_classification_prompt(
     num_projects: int,
     date_range: str,
     global_threshold: float = 0.3,
+    max_patterns: int = 50,
 ) -> str:
     """Build the classification prompt with pattern data.
 
@@ -76,17 +77,22 @@ def build_classification_prompt(
         num_projects: Total number of projects in the archive
         date_range: Human-readable date range string
         global_threshold: Fraction of projects for global scope (default 0.3)
+        max_patterns: Maximum patterns to include (default 50)
 
     Returns:
         Complete prompt string ready to send to Claude
     """
     template = load_prompt_template()
 
-    # Flatten patterns for JSON
+    # Flatten and sort patterns by occurrences (most frequent first)
     all_patterns = []
     for pattern_type, pattern_list in patterns.items():
         for p in pattern_list:
             all_patterns.append(p)
+
+    # Sort by occurrences descending, then limit
+    all_patterns.sort(key=lambda x: x.get("occurrences", 0), reverse=True)
+    all_patterns = all_patterns[:max_patterns]
 
     patterns_json = json.dumps(all_patterns, indent=2)
 
@@ -233,9 +239,11 @@ class PatternClassifier:
         self,
         client: "AnalyzerClaudeClient",
         global_threshold: float = 0.3,
+        max_patterns: int = 50,
     ):
         self.client = client
         self.global_threshold = global_threshold
+        self.max_patterns = max_patterns
 
     async def classify(
         self,
@@ -290,6 +298,7 @@ class PatternClassifier:
             num_projects=summary["total_projects"],
             date_range=date_range,
             global_threshold=self.global_threshold,
+            max_patterns=self.max_patterns,
         )
 
         # Query Claude
@@ -304,6 +313,7 @@ class PatternClassifier:
 async def classify_patterns(
     patterns_result: dict,
     global_threshold: float = 0.3,
+    max_patterns: int = 50,
 ) -> list[ClassifiedPattern]:
     """Main entry point for pattern classification.
 
@@ -312,6 +322,7 @@ async def classify_patterns(
     Args:
         patterns_result: The full result from detect_patterns()
         global_threshold: Fraction of projects for global scope (default 0.3)
+        max_patterns: Maximum patterns to classify (default 50)
 
     Returns:
         List of ClassifiedPattern objects
@@ -320,5 +331,5 @@ async def classify_patterns(
     from .claude_client import AnalyzerClaudeClient
 
     async with AnalyzerClaudeClient() as client:
-        classifier = PatternClassifier(client, global_threshold)
+        classifier = PatternClassifier(client, global_threshold, max_patterns)
         return await classifier.classify(patterns_result)
