@@ -138,6 +138,16 @@ def parse_session(file_path: Path, project_name: str) -> Session:
         if not message_data:
             continue
 
+        # Skip meta messages (system commands, caveats, etc.)
+        if entry.get("isMeta"):
+            continue
+
+        # Skip system command messages
+        content = message_data.get("content", "")
+        text_content = extract_text_content(content) if isinstance(content, list) else content
+        if isinstance(text_content, str) and text_content.strip().startswith(("<command-name>", "<local-command-")):
+            continue
+
         # Update session timestamps
         if timestamp:
             if not session.started_at or timestamp < session.started_at:
@@ -239,15 +249,61 @@ def discover_sessions(projects_dir: Path) -> Iterator[tuple[Path, str]]:
 
 
 def get_project_name_from_dir(dir_name: str) -> str:
-    """Extract a readable project name from a project directory name."""
-    # e.g., "-Users-rishibaldawa-Development-myproject" -> "myproject"
-    # Convert dashes back to path separators and get the last component
-    parts = dir_name.lstrip("-").split("-")
+    """Extract a readable project name from a project directory name.
 
-    # Find the last meaningful part (skip common path components)
-    skip_parts = {"Users", "home", "Development", "Projects", "repos", "src"}
+    Claude Code stores projects in folders like:
+    - -home-user-projects-myproject -> myproject
+    - -Users-name-Development-app -> app
+    - -mnt-c-Users-name-Projects-app -> app
+
+    For nested paths under common roots, extracts the meaningful project portion.
+    Based on simonw/claude-code-transcripts algorithm.
+    """
+    # Common path prefixes to strip (case-insensitive matching)
+    prefixes_to_strip = [
+        "-home-",
+        "-mnt-c-Users-",
+        "-mnt-c-users-",
+        "-Users-",
+    ]
+
+    name = dir_name
+    for prefix in prefixes_to_strip:
+        if name.lower().startswith(prefix.lower()):
+            name = name[len(prefix):]
+            break
+
+    # Split on dashes and find meaningful parts
+    parts = name.split("-")
+
+    # Common intermediate directories to skip
+    skip_dirs = {"projects", "code", "repos", "src", "dev", "work", "documents",
+                 "development", "github", "git"}
+
+    # Find meaningful parts (after skipping username and common dirs)
+    meaningful_parts = []
+    found_project = False
+
+    for i, part in enumerate(parts):
+        if not part:
+            continue
+        # Skip the first part if it looks like a username (before common dirs)
+        if i == 0 and not found_project:
+            # Check if next parts contain common dirs
+            remaining = [p.lower() for p in parts[i + 1:]]
+            if any(d in remaining for d in skip_dirs):
+                continue
+        if part.lower() in skip_dirs:
+            found_project = True
+            continue
+        meaningful_parts.append(part)
+        found_project = True
+
+    if meaningful_parts:
+        return "-".join(meaningful_parts)
+
+    # Fallback: return last non-empty part or original
     for part in reversed(parts):
-        if part and part not in skip_parts:
+        if part:
             return part
-
     return dir_name

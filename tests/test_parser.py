@@ -272,7 +272,19 @@ class TestGetProjectNameFromDir:
         assert get_project_name_from_dir("-Users-john-Development-myproject") == "myproject"
 
     def test_skips_common_paths(self):
-        assert get_project_name_from_dir("-Users-john-Projects-cool-app") == "app"
+        # New algorithm keeps multi-part project names together
+        assert get_project_name_from_dir("-Users-john-Projects-cool-app") == "cool-app"
 
     def test_handles_simple_name(self):
         assert get_project_name_from_dir("myproject") == "myproject"
+
+    def test_strips_home_prefix(self):
+        assert get_project_name_from_dir("-home-user-projects-myapp") == "myapp"
+
+    def test_strips_mnt_prefix(self):
+        assert get_project_name_from_dir("-mnt-c-Users-name-code-webapp") == "webapp"
+
+    def test_skips_intermediate_dirs(self):
+        # Should skip: repos, src, dev, work, documents, github, git
+        assert get_project_name_from_dir("-Users-john-github-my-repo") == "my-repo"
+        assert get_project_name_from_dir("-Users-john-src-backend") == "backend"
