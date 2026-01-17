@@ -246,6 +246,7 @@ def render(ctx, archive_dir: Optional[Path], output_dir: Optional[Path], session
                 total_output_tokens=session_dict["total_output_tokens"] or 0,
                 total_cache_read_tokens=session_dict["total_cache_read_tokens"] or 0,
                 model=session_dict["model"],
+                parent_session_id=session_dict.get("parent_session_id"),
                 messages=messages,
                 tool_calls=tool_calls,
                 tool_results=tool_results,
