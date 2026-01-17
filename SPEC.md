@@ -1,8 +1,6 @@
 # claude-code-archive Specification
 
-Archive Claude Code transcripts from `~/.claude/projects/` into SQLite with TOML export.
-
-**Reference**: [simonw/claude-code-transcripts](https://github.com/simonw/claude-code-transcripts) - HTML renderer, source at `src/claude_code_transcripts/__init__.py`
+Archive Claude Code transcripts from `~/.claude/projects/` into SQLite with TOML export and workflow analysis.
 
 ## Data Flow
 
@@ -11,32 +9,35 @@ Archive Claude Code transcripts from `~/.claude/projects/` into SQLite with TOML
 ├── {project-dir}/       ─────────────►     (SQLite)
 │   ├── {uuid}.jsonl                              │
 │   └── agent-{hash}.jsonl                        │
-                                                  │
-                              render              ▼
-                         ◄─────────────────  archive/transcripts/
-                                             └── {project}/{date}-{id}.toml
+                                                  │ analyze
+                                                  ▼
+                             render         recommendations.md
+                        ◄─────────────     (checkboxes + reasoning)
+archive/transcripts/                              │
+└── {project}/{date}-{id}.toml            analyze --apply
+                                                  ▼
+                                          ~/.claude/skills/
+                                          .claude/skills/
+                                          CLAUDE.md updates
 ```
 
 ## JSONL Source Format
 
 Each line in `~/.claude/projects/{project-dir}/{session}.jsonl`:
 
-### Entry Types
 | Type | Has Message | Description |
 |------|-------------|-------------|
 | `user` | Yes | User message (may contain tool_result blocks) |
 | `assistant` | Yes | Assistant response (may contain tool_use blocks) |
 | `summary` | No | AI-generated session summary |
-| `system` | No | Telemetry (turn duration, etc.) |
-| `file-history-snapshot` | No | File state snapshots |
-| `queue-operation` | No | Queue management |
-| `progress` | No | Progress indicators |
+| `system`, `file-history-snapshot`, `queue-operation`, `progress` | No | Filtered out |
 
 ### Entry Fields
 ```json
 {
-  "type": "user|assistant|summary|system|...",
-  "sessionId": "uuid",
+  "type": "user|assistant|summary|...",
+  "sessionId": "uuid (for agents: parent session ID)",
+  "agentId": "agent-own-id (only in agent sessions)",
   "uuid": "message-uuid",
   "parentUuid": "parent-uuid|null",
   "timestamp": "ISO8601",
@@ -44,27 +45,16 @@ Each line in `~/.claude/projects/{project-dir}/{session}.jsonl`:
   "version": "2.1.9",
   "gitBranch": "branch-name",
   "slug": "human-readable-session-name",
-  "sessionId": "uuid (for agent sessions: parent session ID; for regular: own ID)",
-  "agentId": "agent-own-id (only in agent sessions)",
   "isSidechain": false,
-  "todos": [...],
   "summary": "AI-generated summary text",
   "message": {
     "role": "user|assistant",
-    "content": "string | array of content blocks",
+    "content": "string | [{type: text|thinking|tool_use|tool_result, ...}]",
     "model": "claude-opus-4-5-20251101",
     "stop_reason": "end_turn|max_tokens|tool_use",
     "usage": {"input_tokens": 123, "output_tokens": 456, "cache_read_input_tokens": 789}
   }
 }
-```
-
-### Content Block Types
-```json
-{"type": "text", "text": "..."}
-{"type": "thinking", "thinking": "..."}
-{"type": "tool_use", "id": "toolu_xxx", "name": "Bash", "input": {...}}
-{"type": "tool_result", "tool_use_id": "toolu_xxx", "content": "...", "is_error": false}
 ```
 
 ## SQLite Schema
@@ -73,15 +63,11 @@ Each line in `~/.claude/projects/{project-dir}/{session}.jsonl`:
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
     project TEXT NOT NULL,
-    cwd TEXT,
-    git_branch TEXT,
-    slug TEXT,                    -- human-readable name
+    cwd TEXT, git_branch TEXT, slug TEXT,
     parent_session_id TEXT,       -- for agent sessions
-    summary TEXT,                 -- AI-generated summary
-    started_at TEXT,
-    ended_at TEXT,
-    claude_version TEXT,
-    model TEXT,
+    summary TEXT,
+    started_at TEXT, ended_at TEXT,
+    claude_version TEXT, model TEXT,
     total_input_tokens INTEGER DEFAULT 0,
     total_output_tokens INTEGER DEFAULT 0,
     total_cache_read_tokens INTEGER DEFAULT 0
@@ -92,13 +78,9 @@ CREATE TABLE messages (
     session_id TEXT NOT NULL REFERENCES sessions(id),
     parent_uuid TEXT,
     type TEXT NOT NULL,           -- user, assistant, tool_result
-    timestamp TEXT,
-    content TEXT,
-    thinking TEXT,                -- thinking block content (if captured)
-    model TEXT,
-    stop_reason TEXT,             -- end_turn, max_tokens, tool_use
-    input_tokens INTEGER,
-    output_tokens INTEGER,
+    timestamp TEXT, content TEXT, thinking TEXT,
+    model TEXT, stop_reason TEXT,
+    input_tokens INTEGER, output_tokens INTEGER,
     is_sidechain BOOLEAN DEFAULT FALSE
 );
 
@@ -107,50 +89,33 @@ CREATE TABLE tool_calls (
     message_id TEXT NOT NULL REFERENCES messages(id),
     session_id TEXT NOT NULL REFERENCES sessions(id),
     tool_name TEXT NOT NULL,
-    input_json TEXT,
-    timestamp TEXT
+    input_json TEXT, timestamp TEXT
 );
 
 CREATE TABLE tool_results (
     id TEXT PRIMARY KEY,
     tool_call_id TEXT REFERENCES tool_calls(id),
     session_id TEXT NOT NULL REFERENCES sessions(id),
-    content TEXT,
-    is_error BOOLEAN DEFAULT FALSE,
-    timestamp TEXT
+    content TEXT, is_error BOOLEAN DEFAULT FALSE, timestamp TEXT
 );
 
--- Indexes
 CREATE INDEX idx_messages_session ON messages(session_id);
-CREATE INDEX idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX idx_tool_calls_session ON tool_calls(session_id);
 CREATE INDEX idx_tool_results_session ON tool_results(session_id);
 CREATE INDEX idx_sessions_project ON sessions(project);
-CREATE INDEX idx_sessions_started ON sessions(started_at);
 CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);
 ```
 
 ## Parsing Rules
 
 ### Project Name Extraction
-Directory names like `-Users-john-Development-myproject` are converted to readable names:
-1. Strip common prefixes: `-home-`, `-Users-`, `-mnt-c-Users-`
-2. Skip intermediate directories: `projects`, `code`, `repos`, `src`, `dev`, `work`, `documents`, `development`, `github`, `git`
-3. Join remaining meaningful parts with dashes
+Directory names like `-Users-john-Development-myproject` → readable names:
+1. Strip prefixes: `-home-`, `-Users-`, `-mnt-c-Users-`
+2. Skip intermediate dirs: `projects`, `code`, `repos`, `src`, `dev`, `work`, `documents`, `development`, `github`, `git`
 
-### Temp Directory Filtering
-Sessions from these directories are excluded by default (use `--include-tmp-directories` to include):
-- `-tmp-*` - Unix temp directories
-- `-var-folders-*` - macOS temp cache
-- `-private-var-folders-*` - macOS full path
-- `-private-tmp-*` - macOS private tmp
-- Any path containing `pytest-` - test artifacts
-
-### Message Filtering
-Skip entries during parsing:
-- `isMeta: true` - system metadata messages
-- Content starting with `<command-name>` or `<local-command-` - CLI commands
-- Entry types: `file-history-snapshot`, `queue-operation`, `progress`, `system`
+### Filtering
+- Temp directories excluded by default: `-tmp-*`, `-var-folders-*`, `-private-var-*`, `pytest-`
+- Skip entries: `isMeta: true`, content starting with `<command-name>` or `<local-command-`
 
 ## CLI Commands
 
@@ -158,11 +123,6 @@ Skip entries during parsing:
 ```
 claude-code-archive sync [--projects-dir PATH] [--archive-dir PATH] [--project TEXT] [--force] [--include-tmp-directories]
 ```
-- Incremental by default (skips existing sessions)
-- Extracts project name from directory path (see Parsing Rules)
-- Aggregates token usage per session
-- Runs database migrations automatically
-- Excludes temp directories by default (pytest, /tmp, /var/folders)
 
 ### `render` - Generate TOML transcripts
 ```
@@ -174,92 +134,158 @@ claude-code-archive render [--archive-dir PATH] [--output-dir PATH] [--session T
 claude-code-archive stats [--archive-dir PATH]
 ```
 
+### `analyze` - Generate workflow recommendations
+```
+claude-code-archive analyze [--archive-dir PATH] [--project TEXT] [--since DATE] [--output PATH]
+claude-code-archive analyze --apply PATH
+```
+
+Analyzes archive to surface actionable recommendations for skills, hooks, CLAUDE.md, and permissions. Outputs markdown with checkboxes; user reviews and selects; `--apply` executes selected items.
+
 ### `config` - Manage configuration
 ```
 claude-code-archive config [--archive-dir PATH] [--projects-dir PATH] [--show]
 ```
 
-## TOML Output Format
+## Analyze Command
 
-```toml
-[session]
-id = "uuid"
-slug = "dapper-questing-pascal"
-project = "project-name"
-cwd = "/working/directory"
-git_branch = "branch"
-summary = "AI-generated session summary"
-started_at = "ISO8601"
-ended_at = "ISO8601"
-model = "claude-opus-4-5-20251101"
+### Workflow
+1. `analyze` scans archive, detects patterns, outputs `recommendations.md`
+2. User reviews recommendations with reasoning, checks boxes for ones to apply
+3. `analyze --apply recommendations.md` generates skills/hooks/docs for checked items
 
-[[turns]]
-number = 1
-timestamp = "ISO8601"
+### Recommendation Categories
 
-[turns.user]
-content = '''User message'''
+#### Skill Opportunities
+Detect repeated patterns that could become skills:
+- **Tool sequences**: Same tools called in same order across sessions
+- **Prompt patterns**: Similar user messages appearing multiple times
+- **Successful agent forks**: Sub-agent patterns that complete successfully
 
-[turns.assistant]
-content = '''Assistant response'''
-thinking = '''Optional thinking content'''
+#### Scope Detection
+| Signal | Target Location |
+|--------|-----------------|
+| Pattern in 50%+ of projects | `~/.claude/skills/` (global) |
+| Pattern only in one project | `.claude/skills/` (project) |
+| Pattern only in one directory | `subdir/.claude/skills/` |
+| Repeated user explanation across projects | `~/.claude/CLAUDE.md` |
+| Project-specific convention | `project/CLAUDE.md` |
 
-[[turns.assistant.tool_calls]]
-tool = "Bash"
-id = "toolu_xxx"
-[turns.assistant.tool_calls.input]
-command = "ls -la"
-[turns.assistant.tool_calls.result]
-content = '''Tool output'''
+#### Permission Friction
+Identify tool calls that always succeed but require approval:
+- Track approval/denial/error rates per tool pattern
+- Suggest `allowed-tools` additions for high-approval patterns
+- Distinguish global vs project-specific permissions
+
+#### Hook Candidates
+- **PreToolUse**: Tool calls with high error rates → validation hooks
+- **PostToolUse**: Missing follow-up actions (e.g., edit model.py but no migration)
+- **Blocking**: Dangerous patterns (rm -rf, writing to .env)
+
+#### CLAUDE.md Gaps
+- Files read repeatedly across sessions → document in context
+- Repeated user explanations → capture once
+- Tool errors from unknown conventions → document the convention
+
+#### Agent Efficiency
+- Agent spawn depth vs success rate
+- Sessions with no meaningful output
+- Patterns where parent could have done work directly
+
+### Recommendation Format
+```markdown
+## Skill Opportunities
+
+- [ ] **commit-workflow** [GLOBAL ~/.claude/skills/]
+
+  Seen: 52 times across 9 projects
+  Sequence: `git status` → `git diff` → confirm → `git add` → `git commit`
+  Reasoning: Appears in 85% of projects with identical flow. ~4 turns saved per use.
+
+  <details><summary>Generated SKILL.md</summary>
+
+  ```yaml
+  ---
+  name: commit-workflow
+  description: Stage and commit changes with review. Use when committing code.
+  allowed-tools: Bash(git *)
+  ---
+  ```
+  </details>
+
+- [ ] **django-endpoint** [PROJECT my-api/.claude/skills/]
+
+  Seen: 12 times, only in my-api
+  Reasoning: Uses Django conventions specific to this repo. Not seen in 8 other Python projects.
+
+## Permission Friction
+
+- [ ] **Bash(npm install*)** [GLOBAL]
+
+  89 approvals, 0 denials, 0 errors
+  Reasoning: Always approved. Add to global allowed-tools.
+
+## CLAUDE.md Gaps
+
+- [ ] **Document src/core/config.py** [PROJECT my-api/CLAUDE.md]
+
+  Read 41 times across 15 sessions
+  Reasoning: Claude re-reads constantly. Extract key configs to CLAUDE.md.
 ```
 
-## Configuration
-
-Location: `~/.config/claude-code-archive/config.json`
-```json
-{"archive_dir": "/path/to/archive", "projects_dir": "~/.claude/projects"}
-```
+### Apply Logic
+When `--apply` is run:
+1. Parse markdown, find checked items
+2. For each checked item:
+   - Skills: Create `SKILL.md` in target location
+   - Permissions: Append to existing skill or create permissions skill
+   - CLAUDE.md: Append section to appropriate file (create if needed)
+   - Hooks: Add to `.claude/settings.json` or prompt for hook script location
+3. Report what was created/modified
 
 ## Module Structure
 
 ```
 src/claude_code_archive/
-├── __init__.py      # Version
 ├── cli.py           # Click CLI
 ├── config.py        # Configuration
 ├── database.py      # SQLite operations
 ├── models.py        # Dataclasses
 ├── parser.py        # JSONL parsing
-└── toml_renderer.py # TOML generation
+├── toml_renderer.py # TOML generation
+└── analyzer.py      # Pattern detection + recommendation generation (new)
 ```
 
-## Planned Enhancements
+## Completed Work
 
-### Completed
 - [x] Phase 1: Capture `thinking`, `slug`, `summary`, `stop_reason`, `is_sidechain`
-- [x] Better project name extraction (simonw algorithm)
-- [x] Filter meta/system messages from output
-- [x] Database migrations for schema updates
+- [x] Phase 1: Better project name extraction, filter meta/system messages
+- [x] Phase 1: Database migrations for schema updates
+- [x] Phase 2: Agent relationships (`parent_session_id`, `get_session_tree`, `get_child_sessions`)
 
-### Phase 2: Agent Relationships (Completed)
-- [x] Capture parent session from `sessionId` field (for agent sessions, sessionId points to parent)
-- [x] Query to reconstruct full agent tree (`get_session_tree`, `get_child_sessions`, `get_root_sessions`)
+## Phase 3: Workflow Analysis (Current)
 
-### Phase 3: Export Formats
-- [ ] Markdown export (for committing to repos)
-- [ ] JSON export (for external tools)
+- [ ] Pattern detection for tool sequences
+- [ ] Scope detection (global vs project vs subfolder)
+- [ ] Recommendation markdown generation with reasoning
+- [ ] Checkbox parsing and apply logic
+- [ ] Skill generation
+- [ ] CLAUDE.md updates
+- [ ] Hook suggestions
 
 ## Error Handling
 
-- Invalid JSON lines: Skip with warning, continue
-- Missing files: Report error, continue with others
+- Invalid JSON lines: Skip with warning
+- Missing files: Report, continue
 - Database errors: Fail fast
-- Empty sessions (no messages): Skip
+- Empty sessions: Skip
+- Apply conflicts: Warn, don't overwrite without `--force`
 
 ## Testing
 
 1. Parser tests: All entry types, content blocks
 2. Database tests: CRUD, schema, incremental sync
 3. Renderer tests: TOML format validation
-4. CLI tests: All commands execute correctly
-5. Integration: Full sync → render cycle
+4. Analyzer tests: Pattern detection, scope inference, markdown generation
+5. Apply tests: File generation, conflict handling
+6. Integration: Full sync → analyze → apply cycle
