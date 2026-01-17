@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     git_branch TEXT,
     slug TEXT,
     summary TEXT,
+    parent_session_id TEXT,
     started_at TEXT,
     ended_at TEXT,
     claude_version TEXT,
@@ -62,6 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_results_session ON tool_results(session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 """
 
 # Migrations for existing databases (columns added in Phase 1)
@@ -71,6 +73,8 @@ MIGRATIONS = [
     "ALTER TABLE messages ADD COLUMN thinking TEXT",
     "ALTER TABLE messages ADD COLUMN stop_reason TEXT",
     "ALTER TABLE messages ADD COLUMN is_sidechain BOOLEAN DEFAULT FALSE",
+    # Phase 2: Agent relationships
+    "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT",
 ]
 
 
@@ -124,9 +128,9 @@ class Database:
         conn.execute(
             """
             INSERT OR REPLACE INTO sessions
-            (id, project, cwd, git_branch, slug, summary, started_at, ended_at, claude_version,
-             total_input_tokens, total_output_tokens, total_cache_read_tokens, model)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, project, cwd, git_branch, slug, summary, parent_session_id, started_at, ended_at,
+             claude_version, total_input_tokens, total_output_tokens, total_cache_read_tokens, model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -135,6 +139,7 @@ class Database:
                 session.git_branch,
                 session.slug,
                 session.summary,
+                session.parent_session_id,
                 session.started_at,
                 session.ended_at,
                 session.claude_version,
@@ -300,3 +305,40 @@ class Database:
         stats["projects"] = [row["project"] for row in cursor.fetchall()]
 
         return stats
+
+    def get_child_sessions(self, parent_session_id: str) -> list[dict]:
+        """Get all sessions that have the given session as their parent."""
+        conn = self.connect()
+        cursor = conn.execute(
+            "SELECT * FROM sessions WHERE parent_session_id = ? ORDER BY started_at",
+            (parent_session_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_session_tree(self, session_id: str) -> dict:
+        """Get a session and all its descendants as a tree structure.
+
+        Returns:
+            dict with keys: 'session' (the session data) and 'children' (list of child trees)
+        """
+        conn = self.connect()
+        cursor = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        session_row = cursor.fetchone()
+        if not session_row:
+            return {}
+
+        session = dict(session_row)
+        children = self.get_child_sessions(session_id)
+
+        return {
+            "session": session,
+            "children": [self.get_session_tree(child["id"]) for child in children],
+        }
+
+    def get_root_sessions(self) -> list[dict]:
+        """Get all sessions that have no parent (root sessions)."""
+        conn = self.connect()
+        cursor = conn.execute(
+            "SELECT * FROM sessions WHERE parent_session_id IS NULL ORDER BY started_at DESC"
+        )
+        return [dict(row) for row in cursor.fetchall()]

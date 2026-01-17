@@ -266,6 +266,41 @@ class TestParseSession:
             session = parse_session(Path(f.name), "test-project")
             assert session.messages[0].is_sidechain is True
 
+    def test_parses_parent_session_id_for_agent(self):
+        """Agent sessions have sessionId pointing to parent, different from their own ID."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", prefix="agent-abc123", suffix=".jsonl", delete=False
+        ) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "agentId": "abc123",  # Agent's own ID
+                "sessionId": "parent-session-uuid",  # Parent session
+                "message": {"role": "user", "content": "hello"},
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert session.parent_session_id == "parent-session-uuid"
+
+    def test_no_parent_for_regular_session(self):
+        """Regular sessions have sessionId == own ID, so no parent should be set."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            # Filename determines session ID
+            session_id = Path(f.name).stem
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "sessionId": session_id,  # Same as own ID
+                "message": {"role": "user", "content": "hello"},
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert session.parent_session_id is None
+
 
 class TestGetProjectNameFromDir:
     def test_extracts_last_component(self):

@@ -64,6 +64,7 @@ class Session:
     total_output_tokens: int = 0
     total_cache_read_tokens: int = 0
     model: Optional[str] = None
+    parent_session_id: Optional[str] = None  # For agent sessions, links to parent
     messages: list[Message] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)

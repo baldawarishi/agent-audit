@@ -76,6 +76,8 @@ def render_session_toml(session: Session) -> str:
     if session.slug:
         lines.append(f'slug = "{escape_toml_string(session.slug)}"')
     lines.append(f'project = "{session.project}"')
+    if session.parent_session_id:
+        lines.append(f'parent_session_id = "{session.parent_session_id}"')
     if session.cwd:
         lines.append(f'cwd = "{escape_toml_string(session.cwd)}"')
     if session.git_branch:

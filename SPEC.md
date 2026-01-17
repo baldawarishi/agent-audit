@@ -44,7 +44,8 @@ Each line in `~/.claude/projects/{project-dir}/{session}.jsonl`:
   "version": "2.1.9",
   "gitBranch": "branch-name",
   "slug": "human-readable-session-name",
-  "agentId": "parent-agent-id",
+  "sessionId": "uuid (for agent sessions: parent session ID; for regular: own ID)",
+  "agentId": "agent-own-id (only in agent sessions)",
   "isSidechain": false,
   "todos": [...],
   "summary": "AI-generated summary text",
@@ -231,9 +232,9 @@ src/claude_code_archive/
 - [x] Filter meta/system messages from output
 - [x] Database migrations for schema updates
 
-### Phase 2: Agent Relationships
-- [ ] Capture `agentId` to link subagent sessions to parent
-- [ ] Query to reconstruct full agent tree
+### Phase 2: Agent Relationships (Completed)
+- [x] Capture parent session from `sessionId` field (for agent sessions, sessionId points to parent)
+- [x] Query to reconstruct full agent tree (`get_session_tree`, `get_child_sessions`, `get_root_sessions`)
 
 ### Phase 3: Export Formats
 - [ ] Markdown export (for committing to repos)

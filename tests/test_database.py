@@ -175,3 +175,70 @@ class TestDatabase:
             assert db.session_exists("test-session-123")
 
         db_path.unlink()
+
+    def test_stores_parent_session_id(self, db):
+        """Test that parent_session_id is stored correctly for agent sessions."""
+        parent_session = Session(
+            id="parent-session",
+            project="test-project",
+            started_at="2026-01-01T10:00:00Z",
+        )
+        child_session = Session(
+            id="child-session",
+            project="test-project",
+            parent_session_id="parent-session",
+            started_at="2026-01-01T10:01:00Z",
+        )
+        db.insert_session(parent_session)
+        db.insert_session(child_session)
+
+        sessions = db.get_all_sessions()
+        child = next(s for s in sessions if s["id"] == "child-session")
+        assert child["parent_session_id"] == "parent-session"
+
+    def test_get_child_sessions(self, db):
+        """Test getting all child sessions for a parent."""
+        parent = Session(id="parent", project="p", started_at="2026-01-01T10:00:00Z")
+        child1 = Session(id="child1", project="p", parent_session_id="parent", started_at="2026-01-01T10:01:00Z")
+        child2 = Session(id="child2", project="p", parent_session_id="parent", started_at="2026-01-01T10:02:00Z")
+        other = Session(id="other", project="p", started_at="2026-01-01T10:03:00Z")
+
+        db.insert_session(parent)
+        db.insert_session(child1)
+        db.insert_session(child2)
+        db.insert_session(other)
+
+        children = db.get_child_sessions("parent")
+        assert len(children) == 2
+        assert {c["id"] for c in children} == {"child1", "child2"}
+
+    def test_get_root_sessions(self, db):
+        """Test getting sessions with no parent."""
+        root1 = Session(id="root1", project="p", started_at="2026-01-01T10:00:00Z")
+        root2 = Session(id="root2", project="p", started_at="2026-01-01T10:01:00Z")
+        child = Session(id="child", project="p", parent_session_id="root1", started_at="2026-01-01T10:02:00Z")
+
+        db.insert_session(root1)
+        db.insert_session(root2)
+        db.insert_session(child)
+
+        roots = db.get_root_sessions()
+        assert len(roots) == 2
+        assert {r["id"] for r in roots} == {"root1", "root2"}
+
+    def test_get_session_tree(self, db):
+        """Test reconstructing a session tree with nested children."""
+        root = Session(id="root", project="p", started_at="2026-01-01T10:00:00Z")
+        child1 = Session(id="child1", project="p", parent_session_id="root", started_at="2026-01-01T10:01:00Z")
+        grandchild = Session(id="grandchild", project="p", parent_session_id="child1", started_at="2026-01-01T10:02:00Z")
+
+        db.insert_session(root)
+        db.insert_session(child1)
+        db.insert_session(grandchild)
+
+        tree = db.get_session_tree("root")
+        assert tree["session"]["id"] == "root"
+        assert len(tree["children"]) == 1
+        assert tree["children"][0]["session"]["id"] == "child1"
+        assert len(tree["children"][0]["children"]) == 1
+        assert tree["children"][0]["children"][0]["session"]["id"] == "grandchild"
