@@ -1,10 +1,11 @@
 """Phase 2: LLM-based pattern classification."""
 
 import json
+import tempfile
 from dataclasses import dataclass
 from importlib.resources import files as resource_files
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .patterns import RawPattern
 
@@ -68,7 +69,7 @@ def build_classification_prompt(
     num_projects: int,
     date_range: str,
     global_threshold: float = 0.3,
-    max_patterns: int = 50,
+    patterns_file: Optional[str] = None,
 ) -> str:
     """Build the classification prompt with pattern data.
 
@@ -77,7 +78,8 @@ def build_classification_prompt(
         num_projects: Total number of projects in the archive
         date_range: Human-readable date range string
         global_threshold: Fraction of projects for global scope (default 0.3)
-        max_patterns: Maximum patterns to include (default 50)
+        patterns_file: Path to patterns file (for file-based input), or None
+            for inline patterns
 
     Returns:
         Complete prompt string ready to send to Claude
@@ -90,14 +92,21 @@ def build_classification_prompt(
         for p in pattern_list:
             all_patterns.append(p)
 
-    # Sort by occurrences descending, then limit
+    # Sort by occurrences descending - but don't hard limit
+    # Let Claude decide what to analyze based on prompt guidance
     all_patterns.sort(key=lambda x: x.get("occurrences", 0), reverse=True)
-    all_patterns = all_patterns[:max_patterns]
 
-    patterns_json = json.dumps(all_patterns, indent=2)
+    pattern_count = len(all_patterns)
+
+    # Determine patterns input based on whether we're using file-based input
+    if patterns_file:
+        patterns_input = f"Read the patterns from `{patterns_file}` using the Read tool."
+    else:
+        patterns_input = f"```json\n{json.dumps(all_patterns, indent=2)}\n```"
 
     return template.format(
-        patterns_json=patterns_json,
+        patterns_input=patterns_input,
+        pattern_count=pattern_count,
         num_projects=num_projects,
         date_range=date_range,
         global_threshold_pct=int(global_threshold * 100),
@@ -239,11 +248,11 @@ class PatternClassifier:
         self,
         client: "AnalyzerClaudeClient",
         global_threshold: float = 0.3,
-        max_patterns: int = 50,
+        patterns_file: Optional[str] = None,
     ):
         self.client = client
         self.global_threshold = global_threshold
-        self.max_patterns = max_patterns
+        self.patterns_file = patterns_file
 
     async def classify(
         self,
@@ -298,7 +307,7 @@ class PatternClassifier:
             num_projects=summary["total_projects"],
             date_range=date_range,
             global_threshold=self.global_threshold,
-            max_patterns=self.max_patterns,
+            patterns_file=self.patterns_file,
         )
 
         # Query Claude
@@ -310,26 +319,94 @@ class PatternClassifier:
         return parse_classification_response(response_json, raw_patterns_by_key)
 
 
+# Threshold for using file-based input (patterns written to temp file)
+FILE_BASED_THRESHOLD = 100
+
+
 async def classify_patterns(
     patterns_result: dict,
     global_threshold: float = 0.3,
-    max_patterns: int = 50,
 ) -> list[ClassifiedPattern]:
     """Main entry point for pattern classification.
 
     This function manages the Claude client lifecycle.
 
+    For pattern sets > 100, uses file-based input where patterns are written
+    to a temp file and Claude uses the Read tool to access them.
+
     Args:
         patterns_result: The full result from detect_patterns()
         global_threshold: Fraction of projects for global scope (default 0.3)
-        max_patterns: Maximum patterns to classify (default 50)
 
     Returns:
         List of ClassifiedPattern objects
     """
     # Import at runtime to avoid requiring claude_agent_sdk at module load time
+    from claude_agent_sdk import ClaudeAgentOptions
+
     from .claude_client import AnalyzerClaudeClient
 
-    async with AnalyzerClaudeClient() as client:
-        classifier = PatternClassifier(client, global_threshold, max_patterns)
-        return await classifier.classify(patterns_result)
+    # Count total patterns to decide on input method
+    total_patterns = sum(
+        len(pattern_list)
+        for pattern_list in patterns_result["patterns"].values()
+    )
+
+    if total_patterns > FILE_BASED_THRESHOLD:
+        # Use file-based input for large pattern sets
+        return await _classify_with_file(patterns_result, global_threshold)
+    else:
+        # Use inline approach for smaller sets
+        options = ClaudeAgentOptions(
+            allowed_tools=["Read", "TodoWrite"],
+            permission_mode="bypassPermissions",
+        )
+        async with AnalyzerClaudeClient(options=options) as client:
+            classifier = PatternClassifier(
+                client, global_threshold, patterns_file=None
+            )
+            return await classifier.classify(patterns_result)
+
+
+async def _classify_with_file(
+    patterns_result: dict,
+    global_threshold: float,
+) -> list[ClassifiedPattern]:
+    """Classify patterns using file-based input for large pattern sets.
+
+    Writes patterns to a temp file and instructs Claude to read it.
+
+    Args:
+        patterns_result: The full result from detect_patterns()
+        global_threshold: Fraction of projects for global scope
+
+    Returns:
+        List of ClassifiedPattern objects
+    """
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    from .claude_client import AnalyzerClaudeClient
+
+    # Flatten patterns for the file
+    all_patterns = []
+    for pattern_list in patterns_result["patterns"].values():
+        all_patterns.extend(pattern_list)
+
+    # Sort by occurrences descending
+    all_patterns.sort(key=lambda x: x.get("occurrences", 0), reverse=True)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        patterns_file = Path(temp_dir) / "patterns.json"
+        patterns_file.write_text(json.dumps(all_patterns, indent=2))
+
+        options = ClaudeAgentOptions(
+            allowed_tools=["Read", "TodoWrite"],
+            cwd=temp_dir,
+            permission_mode="bypassPermissions",
+        )
+
+        async with AnalyzerClaudeClient(options=options) as client:
+            classifier = PatternClassifier(
+                client, global_threshold, patterns_file="patterns.json"
+            )
+            return await classifier.classify(patterns_result)

@@ -9,6 +9,7 @@ from typing import Optional
 
 from claude_agent_sdk import (
     AssistantMessage,
+    ClaudeAgentOptions,
     ClaudeSDKClient,
     TextBlock,
 )
@@ -21,7 +22,8 @@ class AnalyzerClaudeClient:
     API key is validated lazily when the session starts.
     """
 
-    def __init__(self):
+    def __init__(self, options: Optional[ClaudeAgentOptions] = None):
+        self.options = options
         self.client: Optional[ClaudeSDKClient] = None
         self._connected = False
 
@@ -46,7 +48,7 @@ class AnalyzerClaudeClient:
                 "Required for LLM classification."
             )
 
-        self.client = ClaudeSDKClient()
+        self.client = ClaudeSDKClient(options=self.options)
         await self.client.connect()
         self._connected = True
 

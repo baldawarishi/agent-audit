@@ -6,19 +6,68 @@ You are analyzing workflow patterns from Claude Code sessions to generate action
 
 - **Total Projects**: {num_projects}
 - **Date Range**: {date_range}
+- **Pattern Count**: {pattern_count} patterns to analyze
 - **Global Threshold**: Patterns appearing in {global_threshold_pct}% or more of projects should be scoped as "global"
+
+## Tools Available
+
+- **Read**: Use this to read the patterns file if provided (for large pattern sets)
+- **TodoWrite**: Use this to track your progress through the analysis
 
 ## Input Patterns
 
-The following patterns were detected from archived Claude Code sessions:
+{patterns_input}
 
-```json
-{patterns_json}
-```
+## Analysis Strategy
+
+You have {pattern_count} patterns to analyze.
+
+### For Small Sets (< 50 patterns)
+Analyze all patterns directly and return classifications.
+
+### For Medium Sets (50-200 patterns)
+1. Use TodoWrite to create a task list grouping patterns by type
+2. Analyze each group, marking todos as you progress
+3. Prioritize patterns that appear across multiple projects
+4. Don't just look at occurrence count - a pattern in 5/36 projects
+   with 20 occurrences may be MORE valuable than one in 1 project
+   with 500 occurrences
+
+### For Large Sets (200+ patterns)
+1. Use TodoWrite to plan your analysis chunks
+2. First pass: Quick scan to identify high-value patterns
+   - Cross-project spread (appears in many projects)
+   - Tool sequences (most actionable)
+   - File access patterns (clear documentation candidates)
+3. Second pass: Detailed classification of top candidates
+4. Skip low-value patterns (single-project prompt phrases, etc.)
+
+## Prioritization Guidelines
+
+When deciding which patterns to classify in detail:
+
+| Signal | Priority | Reasoning |
+|--------|----------|-----------|
+| Appears in 30%+ projects | HIGH | Global skill/doc candidate |
+| Tool sequence pattern | HIGH | Most actionable |
+| Appears in 3+ projects | MEDIUM | Cross-project value |
+| File access pattern | MEDIUM | Clear doc candidate |
+| Single-project pattern | LOW | Limited scope |
+| Vague prompt phrase | LOW | Hard to action |
+
+**Key insight**: A pattern in 5 projects with 20 occurrences > pattern in 1 project with 500 occurrences.
+
+## Context Window Management
+
+If analyzing many patterns:
+- Don't try to hold all patterns in context at once
+- Use TodoWrite to track which batches you've analyzed
+- Summarize findings incrementally
+- Focus on quality over quantity
 
 ## Classification Task
 
-For each pattern, determine:
+For each pattern you choose to classify, determine:
 
 1. **category**: What type of recommendation this should become
    - `skill`: A repeatable workflow that should become a reusable skill (SKILL.md)
@@ -43,6 +92,16 @@ For each pattern, determine:
 
 ## Classification Guidelines
 
+### Understanding Tool Names
+Pattern keys use specific naming conventions:
+- **Native tools**: `Read`, `Edit`, `Write`, `Grep`, `Glob`, `TodoWrite` - these are Claude Code's built-in tools
+- **Bash commands**: `Bash:command` format (e.g., `Bash:git-status`, `Bash:grep`, `Bash:ls`) - these are shell commands run via Bash tool
+
+**Important distinctions**:
+- `Grep` (native tool) is already optimal - don't suggest migrating to itself
+- `Bash:grep` (shell command) could potentially use the native `Grep` tool instead
+- `Bash:git-*` commands are appropriate - git has no native tool equivalent
+
 ### Tool Sequences → Skills
 - Repeated tool sequences (especially git workflows, build commands, test runs) are good skill candidates
 - The sequence should represent a coherent workflow, not random tool usage
@@ -56,6 +115,13 @@ For each pattern, determine:
 ### Prompt Patterns → Skills or CLAUDE.md
 - Repeated prompt prefixes suggest recurring tasks → skill candidates
 - Repeated explanatory phrases suggest missing documentation → CLAUDE.md candidates
+
+### Content Brevity
+Keep `suggested_content` concise and actionable:
+- **Skills**: Include name, description, allowed-tools, and 3-5 clear steps
+- **CLAUDE.md**: 1-2 paragraphs with key points, not exhaustive documentation
+- **Hooks**: Just the hook configuration JSON
+- Avoid lengthy examples or tutorials - focus on the essential guidance
 
 ### Scope Detection
 - Count unique projects for each pattern

@@ -531,7 +531,8 @@ class TestClassifier:
     def test_load_prompt_template(self):
         """Test that prompt template loads successfully."""
         template = load_prompt_template()
-        assert "{patterns_json}" in template
+        assert "{patterns_input}" in template
+        assert "{pattern_count}" in template
         assert "{num_projects}" in template
         assert "{date_range}" in template
 
@@ -561,6 +562,33 @@ class TestClassifier:
         assert "2025-01-01 to 2025-01-15" in prompt
         assert "30%" in prompt  # global threshold
         assert "A -> B -> C" in prompt
+        assert "1 patterns" in prompt  # pattern_count
+
+    def test_build_classification_prompt_with_file(self):
+        """Test building classification prompt with file-based input."""
+        patterns = {
+            "tool_sequences": [
+                {
+                    "pattern_type": "tool_sequence",
+                    "pattern_key": "A -> B -> C",
+                    "occurrences": 10,
+                }
+            ],
+            "prompt_prefixes": [],
+            "prompt_phrases": [],
+            "file_access": [],
+        }
+
+        prompt = build_classification_prompt(
+            patterns=patterns,
+            num_projects=5,
+            date_range="2025-01-01 to 2025-01-15",
+            global_threshold=0.3,
+            patterns_file="patterns.json",
+        )
+
+        assert "Read the patterns from `patterns.json`" in prompt
+        assert "A -> B -> C" not in prompt  # Not inline when using file
 
     def test_compute_scope_global(self):
         """Test scope detection for global patterns."""
@@ -897,7 +925,9 @@ class TestPatternClassifierIntegration:
             return_value=mock_claude_response
         )
 
-        classifier = PatternClassifier(client=mock_client, global_threshold=0.3)
+        classifier = PatternClassifier(
+            client=mock_client, global_threshold=0.3, patterns_file=None
+        )
 
         # Run classification
         results = await classifier.classify(sample_patterns_result)
