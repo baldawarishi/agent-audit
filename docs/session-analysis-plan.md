@@ -138,9 +138,9 @@ After each experiment, user reviews:
 
 ### Experiment 1: Implement Phase 1 Runner
 **Goal:** Create `analyze` command that runs per-project analysis
-**Status:** IN PROGRESS - AWAITING VERIFICATION
+**Status:** DONE
 **Output:** `archive/analysis/run-20260120-034634/` - 3 project files
-**Verify:** User reviews output files, confirms insights are useful
+**Verify:** User reviewed - insights are useful, found real inefficiencies
 
 **Implementation Notes:**
 - Added `Database.get_project_metrics()` for session/turn/token counts
@@ -149,10 +149,15 @@ After each experiment, user reviews:
 - Prompt template at `prompts/session_analysis.md`
 - Projects: java-tools-ai-tools-repo-drift (206), claude-archive (13), java-build-split (26)
 
+**Key Findings:**
+- 16% warmup session overhead identified
+- Batch processing inefficiencies (25 turns → could be 1)
+- Clear PR workflow patterns emerged
+
 ### Experiment 2: Global Synthesis
 **Goal:** Run Phase 2 on Experiment 1 outputs
-**Status:** BLOCKED (needs Exp 1)
-**Output:** `archive/analysis/run-{timestamp}/global-synthesis.md`
+**Status:** NOT STARTED
+**Output:** `archive/analysis/run-20260120-034634/global-synthesis.md`
 **Verify:** User confirms cross-project patterns are meaningful
 
 ### Experiment 3: Interactive Exploration
