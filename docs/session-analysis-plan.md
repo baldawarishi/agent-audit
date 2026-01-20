@@ -138,9 +138,15 @@ After each experiment, user reviews:
 
 ### Experiment 1: Implement Phase 1 Runner
 **Goal:** Create `analyze` command that runs per-project analysis
-**Status:** NOT STARTED
-**Output:** `archive/analysis/run-{timestamp}/{project}.md` for 3 projects
+**Status:** IN PROGRESS - AWAITING VERIFICATION
+**Output:** `archive/analysis/run-20260120-033035/` - 3 project files
 **Verify:** User reviews output files, confirms insights are useful
+
+**Implementation Notes:**
+- Added `Database.get_project_metrics()` for session/turn/token counts
+- Created `analyzer/session_analyzer.py` with `SessionAnalyzer` class
+- Modified `analyze` command - new session analysis is default, `--legacy` for old
+- Prompt template at `prompts/session_analysis.md`
 
 ### Experiment 2: Global Synthesis
 **Goal:** Run Phase 2 on Experiment 1 outputs
