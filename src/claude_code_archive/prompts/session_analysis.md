@@ -49,8 +49,8 @@ A 2-3 sentence overview of the project's session health and key findings.
 For each session you analyzed in detail:
 
 ```
-#### Session: {slug or id}
-- **File**: `{toml_file_path}`
+#### Session: {{slug or id}}
+- **File**: `{{toml_file_path}}`
 - **Turns**: X | **Tokens**: Y input / Z output
 - **Quality**: Good/Okay/Ugly
 - **Task**: What the user was trying to do
