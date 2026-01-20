@@ -376,39 +376,44 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
     help="Path to archive directory (overrides config)",
 )
 @click.option(
+    "--legacy",
+    is_flag=True,
+    help="Use legacy pattern detection analyzer (deprecated)",
+)
+@click.option(
     "--project",
     type=str,
     default=None,
-    help="Filter to specific project",
+    help="Filter to specific project (legacy mode only)",
 )
 @click.option(
     "--since",
     type=str,
     default=None,
-    help="Only analyze sessions since this ISO date (e.g., 2025-01-01)",
+    help="Only analyze sessions since this ISO date (legacy mode only)",
 )
 @click.option(
     "--patterns-only",
     is_flag=True,
-    help="Output raw patterns as JSON (skip LLM classification)",
+    help="Output raw patterns as JSON (legacy mode only)",
 )
 @click.option(
     "--min-occurrences",
     type=int,
     default=3,
-    help="Minimum pattern occurrences (default: 3)",
+    help="Minimum pattern occurrences (legacy mode only, default: 3)",
 )
 @click.option(
     "--min-sessions",
     type=int,
     default=2,
-    help="Minimum distinct sessions (default: 2)",
+    help="Minimum distinct sessions (legacy mode only, default: 2)",
 )
 @click.option(
     "--global-threshold",
     type=float,
     default=0.3,
-    help="Fraction of projects for global scope (default: 0.3 = 30%%)",
+    help="Fraction of projects for global scope (legacy mode only, default: 0.3)",
 )
 @click.option(
     "--output",
@@ -420,6 +425,7 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
 def analyze(
     ctx,
     archive_dir: Optional[Path],
+    legacy: bool,
     project: Optional[str],
     since: Optional[str],
     patterns_only: bool,
@@ -428,14 +434,12 @@ def analyze(
     global_threshold: float,
     output: Optional[Path],
 ):
-    """Analyze archived sessions for workflow patterns."""
+    """Analyze archived sessions for patterns and insights.
+
+    By default, runs per-project session analysis on hardcoded projects.
+    Use --legacy for the old pattern detection approach.
+    """
     import asyncio
-    from .analyzer import (
-        detect_patterns,
-        classify_patterns,
-        render_summary_stdout,
-        write_recommendations,
-    )
 
     cfg: Config = ctx.obj["config"]
 
@@ -446,10 +450,100 @@ def analyze(
         click.echo("No archive database found. Run 'sync' first.")
         return
 
+    if legacy:
+        _run_legacy_analyze(
+            ctx, cfg, project, since, patterns_only,
+            min_occurrences, min_sessions, global_threshold, output
+        )
+    else:
+        _run_session_analysis(ctx, cfg, output)
+
+
+def _run_session_analysis(ctx, cfg: Config, output: Optional[Path]):
+    """Run per-project session analysis."""
+    import asyncio
+    from .analyzer.session_analyzer import SessionAnalyzer
+    from .analyzer.claude_client import AnalyzerClaudeClient
+
+    # Hardcoded projects for Experiment 1
+    projects = ["repo-drift", "claude-archive", "cap-finreq"]
+
+    db = Database(cfg.db_path)
+
+    # Create run directory with timestamp
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    run_dir = cfg.archive_dir / "analysis" / f"run-{timestamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    click.echo(f"Starting session analysis...")
+    click.echo(f"Output directory: {run_dir}")
+    click.echo()
+
+    async def run_analysis():
+        async with AnalyzerClaudeClient() as client:
+            with db:
+                analyzer = SessionAnalyzer(
+                    client=client,
+                    db=db,
+                    toml_dir=cfg.toml_dir,
+                )
+
+                for i, project in enumerate(projects, 1):
+                    click.echo(f"Analyzing project {i}/{len(projects)}: {project}...")
+
+                    # Check if project has sessions
+                    metrics = db.get_project_metrics(project)
+                    if metrics["session_count"] == 0:
+                        click.echo(f"  Skipping (no sessions)")
+                        continue
+
+                    click.echo(f"  Sessions: {metrics['session_count']}, Turns: {metrics['turn_count']}")
+
+                    try:
+                        result = await analyzer.analyze_project(project)
+
+                        # Write output
+                        output_path = run_dir / f"{project}.md"
+                        output_path.write_text(result)
+                        click.echo(f"  Written: {output_path}")
+                    except Exception as e:
+                        click.echo(f"  Error: {e}")
+
+    try:
+        asyncio.run(run_analysis())
+        click.echo()
+        click.echo(f"Analysis complete. Output: {run_dir}")
+    except ValueError as e:
+        if "ANTHROPIC_API_KEY" in str(e):
+            click.echo(f"\nError: {e}")
+        else:
+            raise
+
+
+def _run_legacy_analyze(
+    ctx,
+    cfg: Config,
+    project: Optional[str],
+    since: Optional[str],
+    patterns_only: bool,
+    min_occurrences: int,
+    min_sessions: int,
+    global_threshold: float,
+    output: Optional[Path],
+):
+    """Run legacy pattern detection analyzer."""
+    import asyncio
+    from .analyzer import (
+        detect_patterns,
+        classify_patterns,
+        render_summary_stdout,
+        write_recommendations,
+    )
+
     db = Database(cfg.db_path)
 
     with db:
-        click.echo("Detecting patterns...")
+        click.echo("Detecting patterns (legacy mode)...")
         result = detect_patterns(
             db=db,
             min_occurrences=min_occurrences,

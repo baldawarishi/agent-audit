@@ -50,3 +50,15 @@ class TestCli:
     def test_sync_missing_projects_dir(self, runner):
         result = runner.invoke(main, ["sync", "--projects-dir", "/nonexistent/path"])
         assert result.exit_code != 0  # Should fail because path doesn't exist
+
+    def test_analyze_no_db(self, runner, temp_archive_dir):
+        """Analyze command should error without database."""
+        result = runner.invoke(main, ["analyze", "--archive-dir", str(temp_archive_dir)])
+        assert result.exit_code == 0
+        assert "No archive database found" in result.output
+
+    def test_analyze_legacy_flag_exists(self, runner):
+        """Analyze command should accept --legacy flag."""
+        result = runner.invoke(main, ["analyze", "--help"])
+        assert result.exit_code == 0
+        assert "--legacy" in result.output
