@@ -109,15 +109,21 @@ Ask me questions if anything is unclear before proceeding.
 
 ## Experiment Log
 
-### Experiment 1: [NOT STARTED]
-**Goal:** Implement Phase 1 for 3 hardcoded projects
-**Status:** Not started
-**Verification:** Manual review of output files
+### Experiment 1: Implement Phase 1 Runner
+**Goal:** Create script that runs per-project analysis for 3 projects
+**Status:** IN PROGRESS
+**Projects:** repo-drift, claude-archive, cap-finreq
+**Verification:** Manual review of output files in `archive/analysis/run-{timestamp}/`
 
-### Experiment 2: [NOT STARTED]
-**Goal:** Run Phase 2 global synthesis
+### Experiment 2: Global Synthesis
+**Goal:** Run Phase 2 on Experiment 1 outputs
 **Status:** Blocked on Experiment 1
 **Verification:** Manual review of global-synthesis.md
+
+### Experiment 3: Interactive Exploration
+**Goal:** Test asking questions against analysis files
+**Status:** Blocked on Experiment 2
+**Verification:** Can Claude answer questions and dig into TOML when needed?
 
 ---
 
@@ -152,13 +158,100 @@ content = "assistant response"
 thinking = "thinking content (if available)"
 ```
 
-## Questions to Resolve
+## Design Decisions (Resolved)
 
-Before implementing, need answers on:
+1. **Analysis depth:** Detailed - step-by-step what was tried, what worked/didn't
+2. **Pattern threshold:** Let Claude decide, but focus on pragmatic optimizations (not over-the-top)
+3. **Include thinking blocks:** Yes - may reveal reasoning patterns
+4. **Data sources:**
+   - SQLite for exact stats/numbers (turn counts, token usage, tool call counts)
+   - TOML for browsing/reading session content
+   - Can extend TOML export if more fields would help Claude form opinions
 
-1. **Analysis depth:** How detailed should each session summary be? (1-2 sentences per session? More?)
-2. **Pattern threshold:** How many sessions should show a pattern before it's "worth noting"?
-3. **Include thinking blocks?** Should Claude analyze the thinking content too, or just user/assistant?
+## Implementation Details
+
+### Current Code to Modify
+
+**Keep:**
+- `cli.py` - Modify `analyze` command
+- `database.py` - Use for metrics queries
+
+**Replace/Simplify:**
+- `analyzer/classifier.py` - Remove LLM classifier (not working for us)
+- `analyzer/claude_client.py` - Remove (will use subprocess instead)
+- `analyzer/patterns.py` - Keep for metrics extraction, simplify
+- `analyzer/renderer.py` - Simplify or remove
+
+### New Approach
+
+```python
+# In cli.py analyze command:
+
+1. Query SQLite for project metrics:
+   - Sessions per project
+   - Avg turns, tokens per session
+   - Tool call counts
+
+2. For each project (3 hardcoded for now):
+   a. Create context file with:
+      - Project metrics from SQLite
+      - Good/bad/ugly session definitions
+      - Instructions for Claude
+      - Path to TOML files
+
+   b. Invoke Claude CLI:
+      subprocess.run([
+          "claude", "--print",
+          "-p", prompt_with_context_file_path,
+          "--output-format", "text"
+      ])
+
+   c. Capture output to:
+      archive/analysis/run-{timestamp}/{project}.md
+
+3. Show progress:
+   - "Analyzing project 1/3: repo-drift..."
+   - "Analyzing project 2/3: claude-archive..."
+   - etc.
+```
+
+### Hardcoded Projects (for testing)
+
+```python
+TEST_PROJECTS = [
+    "repo-drift",      # 21 sessions, known project
+    "claude-archive",  # 13 sessions, this project
+    "cap-finreq",      # 20 sessions, work variety
+]
+```
+
+### Claude Prompt Template
+
+```markdown
+# Session Analysis for {project}
+
+## Your Task
+Read sessions from `{toml_folder}` to understand usage patterns.
+Pick sessions randomly. Keep reading until you see patterns worth optimizing.
+Focus on pragmatic improvements, not over-the-top suggestions.
+
+## Project Metrics (from database)
+- Total sessions: {session_count}
+- Avg turns per session: {avg_turns}
+- Avg tokens per session: {avg_tokens}
+
+## Session Quality Definitions
+- **Good**: <5 turns, <20k tokens - quick, efficient
+- **Okay**: 5-15 turns, 20-50k tokens - normal work
+- **Ugly**: >15 turns, >50k tokens - struggling or complex
+
+## Output Format
+Write detailed analysis to `{output_file}`:
+1. Sessions reviewed (with file paths)
+2. Patterns observed
+3. Potential optimizations
+4. Things that worked well
+```
 
 ## Related Files
 
