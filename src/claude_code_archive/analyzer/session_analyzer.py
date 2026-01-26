@@ -38,6 +38,41 @@ def load_session_analysis_template() -> str:
     return template_path.read_text()
 
 
+def load_global_synthesis_template() -> str:
+    """Load the global synthesis prompt template.
+
+    Returns:
+        The template string with placeholders.
+    """
+    template_path = Path(__file__).parent.parent / "prompts" / "global_synthesis.md"
+    return template_path.read_text()
+
+
+def build_global_synthesis_prompt(
+    analysis_files: list[Path],
+    analysis_dir: Path,
+) -> str:
+    """Build the global synthesis prompt with analysis file list.
+
+    Args:
+        analysis_files: List of paths to per-project analysis files
+        analysis_dir: Directory containing the analysis files
+
+    Returns:
+        Formatted prompt string.
+    """
+    template = load_global_synthesis_template()
+
+    # Format analysis files as a bulleted list
+    files_list = "\n".join(f"- `{f.name}`" for f in analysis_files)
+
+    return template.format(
+        project_count=len(analysis_files),
+        analysis_files=files_list,
+        analysis_dir=str(analysis_dir),
+    )
+
+
 def build_session_analysis_prompt(
     project: str,
     session_count: int,
@@ -156,6 +191,36 @@ class SessionAnalyzer:
             project_min_msgs=project_stats["min_msgs"],
             project_max_msgs=project_stats["max_msgs"],
             project_avg_tokens=project_stats["avg_tokens"],
+        )
+
+        # Query Claude and return the response
+        return await self.client.query(prompt)
+
+    async def synthesize_global(self, analysis_dir: Path) -> str:
+        """Synthesize cross-project patterns from per-project analyses.
+
+        Args:
+            analysis_dir: Directory containing per-project analysis .md files
+
+        Returns:
+            Markdown synthesis content.
+
+        Raises:
+            ValueError: If no analysis files are found.
+        """
+        # Find all .md files except global-synthesis.md
+        analysis_files = [
+            f for f in sorted(analysis_dir.glob("*.md"))
+            if f.name != "global-synthesis.md"
+        ]
+
+        if not analysis_files:
+            raise ValueError(f"No analysis files found in {analysis_dir}")
+
+        # Build the prompt
+        prompt = build_global_synthesis_prompt(
+            analysis_files=analysis_files,
+            analysis_dir=analysis_dir,
         )
 
         # Query Claude and return the response

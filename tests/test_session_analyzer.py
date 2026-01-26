@@ -9,6 +9,8 @@ from claude_code_archive.analyzer.session_analyzer import (
     SessionAnalyzer,
     build_session_analysis_prompt,
     load_session_analysis_template,
+    build_global_synthesis_prompt,
+    load_global_synthesis_template,
 )
 
 
@@ -207,3 +209,150 @@ class TestSessionAnalyzer:
 
         # Should still call Claude even with empty project
         mock_client.query.assert_called_once()
+
+
+class TestLoadGlobalSynthesisTemplate:
+    """Tests for loading the global synthesis prompt template."""
+
+    def test_template_loads_successfully(self):
+        """Template file exists and loads."""
+        template = load_global_synthesis_template()
+        assert isinstance(template, str)
+        assert len(template) > 100
+
+    def test_template_has_placeholders(self):
+        """Template contains required placeholders."""
+        template = load_global_synthesis_template()
+        assert "{project_count}" in template
+        assert "{analysis_files}" in template
+        assert "{analysis_dir}" in template
+
+    def test_template_has_critical_framing(self):
+        """Template uses critical/skeptical framing, not positive."""
+        template = load_global_synthesis_template()
+        assert "skeptical analyst" in template.lower()
+        # Should not have overly positive framing instructions
+        assert "excellent" not in template.lower() or "do not use" in template.lower()
+
+    def test_template_requires_evidence(self):
+        """Template requires evidence from multiple projects."""
+        template = load_global_synthesis_template()
+        assert "evidence" in template.lower()
+        assert "quote" in template.lower()
+
+    def test_template_has_assumption_marking(self):
+        """Template instructs to mark assumptions with brackets."""
+        template = load_global_synthesis_template()
+        assert "[SQUARE BRACKETS" in template or "SQUARE BRACKETS" in template
+
+
+class TestBuildGlobalSynthesisPrompt:
+    """Tests for building the global synthesis prompt."""
+
+    def test_builds_prompt_with_file_list(self):
+        """Prompt includes analysis file paths."""
+        analysis_files = [
+            Path("/analysis/run-123/project-a.md"),
+            Path("/analysis/run-123/project-b.md"),
+        ]
+        prompt = build_global_synthesis_prompt(
+            analysis_files=analysis_files,
+            analysis_dir=Path("/analysis/run-123"),
+        )
+
+        assert "2" in prompt  # project_count
+        assert "project-a.md" in prompt
+        assert "project-b.md" in prompt
+        assert "/analysis/run-123" in prompt
+
+    def test_builds_prompt_with_single_file(self):
+        """Prompt handles single analysis file."""
+        analysis_files = [Path("/analysis/run-123/single-project.md")]
+        prompt = build_global_synthesis_prompt(
+            analysis_files=analysis_files,
+            analysis_dir=Path("/analysis/run-123"),
+        )
+
+        assert "1" in prompt  # project_count
+        assert "single-project.md" in prompt
+
+
+class TestSessionAnalyzerGlobalSynthesis:
+    """Tests for SessionAnalyzer global synthesis."""
+
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock Claude client."""
+        client = MagicMock()
+        client.query = AsyncMock(return_value="# Global Synthesis\n\nCross-project patterns")
+        return client
+
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock database."""
+        return MagicMock()
+
+    @pytest.mark.asyncio
+    async def test_synthesize_global(self, mock_client, mock_db, tmp_path):
+        """Test global synthesis across multiple project analyses."""
+        # Create fake analysis files
+        analysis_dir = tmp_path / "analysis" / "run-123"
+        analysis_dir.mkdir(parents=True)
+        (analysis_dir / "project-a.md").write_text("# Project A Analysis")
+        (analysis_dir / "project-b.md").write_text("# Project B Analysis")
+
+        analyzer = SessionAnalyzer(
+            client=mock_client,
+            db=mock_db,
+            toml_dir=tmp_path / "toml",
+        )
+
+        result = await analyzer.synthesize_global(analysis_dir)
+
+        # Verify Claude was invoked with synthesis prompt
+        mock_client.query.assert_called_once()
+        prompt_arg = mock_client.query.call_args[0][0]
+        assert "project-a.md" in prompt_arg
+        assert "project-b.md" in prompt_arg
+        assert str(analysis_dir) in prompt_arg
+
+        # Verify result
+        assert result == "# Global Synthesis\n\nCross-project patterns"
+
+    @pytest.mark.asyncio
+    async def test_synthesize_global_excludes_non_md_files(self, mock_client, mock_db, tmp_path):
+        """Global synthesis only includes .md files."""
+        analysis_dir = tmp_path / "analysis" / "run-123"
+        analysis_dir.mkdir(parents=True)
+        (analysis_dir / "project-a.md").write_text("# Project A Analysis")
+        (analysis_dir / "project-b.txt").write_text("Not an analysis file")
+        (analysis_dir / "global-synthesis.md").write_text("Existing synthesis")
+
+        analyzer = SessionAnalyzer(
+            client=mock_client,
+            db=mock_db,
+            toml_dir=tmp_path / "toml",
+        )
+
+        await analyzer.synthesize_global(analysis_dir)
+
+        prompt_arg = mock_client.query.call_args[0][0]
+        assert "project-a.md" in prompt_arg
+        assert "project-b.txt" not in prompt_arg
+        # Should exclude existing global synthesis file
+        assert "global-synthesis.md" not in prompt_arg
+
+    @pytest.mark.asyncio
+    async def test_synthesize_global_empty_directory(self, mock_client, mock_db, tmp_path):
+        """Global synthesis raises error on empty directory."""
+        analysis_dir = tmp_path / "analysis" / "run-123"
+        analysis_dir.mkdir(parents=True)
+
+        analyzer = SessionAnalyzer(
+            client=mock_client,
+            db=mock_db,
+            toml_dir=tmp_path / "toml",
+        )
+
+        with pytest.raises(ValueError, match="No analysis files found"):
+            await analyzer.synthesize_global(analysis_dir)

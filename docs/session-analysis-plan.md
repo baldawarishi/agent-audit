@@ -156,9 +156,22 @@ After each experiment, user reviews:
 
 ### Experiment 2: Global Synthesis
 **Goal:** Run Phase 2 on Experiment 1 outputs
-**Status:** NOT STARTED
-**Output:** `archive/analysis/run-20260120-034634/global-synthesis.md`
+**Status:** IN PROGRESS (awaiting user verification)
+**Output:** `archive/analysis/run-20260120-163614/global-synthesis.md`
 **Verify:** User confirms cross-project patterns are meaningful
+
+**Implementation Notes:**
+- Added `load_global_synthesis_template()` and `build_global_synthesis_prompt()` to session_analyzer.py
+- Added `synthesize_global()` method to SessionAnalyzer class
+- Created prompt template at `prompts/global_synthesis.md` with critical/skeptical framing
+- Added `--synthesize` CLI flag to run global synthesis on existing analysis directories
+- All 18 session_analyzer tests pass
+
+**Synthesis Results:**
+- 7 cross-project patterns identified
+- 60% of sessions (Ugly+Okay) have significant inefficiencies
+- ~150,000 tokens of estimated waste
+- 6 prioritized recommendations with ~128,000 tokens recoverable
 
 ### Experiment 3: Interactive Exploration
 **Goal:** Test asking questions against analysis files

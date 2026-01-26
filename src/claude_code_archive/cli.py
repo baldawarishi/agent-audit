@@ -397,6 +397,12 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
     help="Use legacy pattern detection analyzer (deprecated)",
 )
 @click.option(
+    "--synthesize",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Run global synthesis on existing analysis run directory",
+)
+@click.option(
     "--project",
     type=str,
     default=None,
@@ -442,6 +448,7 @@ def analyze(
     ctx,
     archive_dir: Optional[Path],
     legacy: bool,
+    synthesize: Optional[Path],
     project: Optional[str],
     since: Optional[str],
     patterns_only: bool,
@@ -453,6 +460,7 @@ def analyze(
     """Analyze archived sessions for patterns and insights.
 
     By default, runs per-project session analysis on hardcoded projects.
+    Use --synthesize to run global synthesis on existing analysis files.
     Use --legacy for the old pattern detection approach.
     """
 
@@ -465,7 +473,9 @@ def analyze(
         click.echo("No archive database found. Run 'sync' first.")
         return
 
-    if legacy:
+    if synthesize:
+        _run_global_synthesis(ctx, cfg, synthesize)
+    elif legacy:
         _run_legacy_analyze(
             ctx, cfg, project, since, patterns_only,
             min_occurrences, min_sessions, global_threshold, output
@@ -528,6 +538,63 @@ def _run_session_analysis(ctx, cfg: Config, output: Optional[Path]):
         asyncio.run(run_analysis())
         click.echo()
         click.echo(f"Analysis complete. Output: {run_dir}")
+    except ValueError as e:
+        if "ANTHROPIC_API_KEY" in str(e):
+            click.echo(f"\nError: {e}")
+        else:
+            raise
+
+
+def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
+    """Run global synthesis on existing per-project analyses."""
+    import asyncio
+    from .analyzer.session_analyzer import SessionAnalyzer
+    from .analyzer.claude_client import AnalyzerClaudeClient
+
+    # Count analysis files (excluding global-synthesis.md)
+    analysis_files = [
+        f for f in analysis_dir.glob("*.md")
+        if f.name != "global-synthesis.md"
+    ]
+
+    if not analysis_files:
+        click.echo(f"No analysis files found in {analysis_dir}")
+        return
+
+    click.echo("Starting global synthesis...")
+    click.echo(f"Analysis directory: {analysis_dir}")
+    click.echo(f"Project analyses found: {len(analysis_files)}")
+    for f in sorted(analysis_files):
+        click.echo(f"  - {f.name}")
+    click.echo()
+
+    async def run_synthesis():
+        async with AnalyzerClaudeClient() as client:
+            # Database not needed for synthesis, but required by SessionAnalyzer
+            db = Database(cfg.db_path)
+            with db:
+                analyzer = SessionAnalyzer(
+                    client=client,
+                    db=db,
+                    toml_dir=cfg.toml_dir,
+                )
+
+                click.echo("Running synthesis across all project analyses...")
+
+                try:
+                    result = await analyzer.synthesize_global(analysis_dir)
+
+                    # Write output
+                    output_path = analysis_dir / "global-synthesis.md"
+                    output_path.write_text(result)
+                    click.echo(f"Written: {output_path}")
+                except ValueError as e:
+                    click.echo(f"Error: {e}")
+
+    try:
+        asyncio.run(run_synthesis())
+        click.echo()
+        click.echo(f"Synthesis complete.")
     except ValueError as e:
         if "ANTHROPIC_API_KEY" in str(e):
             click.echo(f"\nError: {e}")
