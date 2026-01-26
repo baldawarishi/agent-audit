@@ -1,6 +1,5 @@
 """CLI for Claude Code archive."""
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -392,76 +391,21 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
     help="Path to archive directory (overrides config)",
 )
 @click.option(
-    "--legacy",
-    is_flag=True,
-    help="Use legacy pattern detection analyzer (deprecated)",
-)
-@click.option(
     "--synthesize",
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="Run global synthesis on existing analysis run directory",
 )
-@click.option(
-    "--project",
-    type=str,
-    default=None,
-    help="Filter to specific project (legacy mode only)",
-)
-@click.option(
-    "--since",
-    type=str,
-    default=None,
-    help="Only analyze sessions since this ISO date (legacy mode only)",
-)
-@click.option(
-    "--patterns-only",
-    is_flag=True,
-    help="Output raw patterns as JSON (legacy mode only)",
-)
-@click.option(
-    "--min-occurrences",
-    type=int,
-    default=3,
-    help="Minimum pattern occurrences (legacy mode only, default: 3)",
-)
-@click.option(
-    "--min-sessions",
-    type=int,
-    default=2,
-    help="Minimum distinct sessions (legacy mode only, default: 2)",
-)
-@click.option(
-    "--global-threshold",
-    type=float,
-    default=0.3,
-    help="Fraction of projects for global scope (legacy mode only, default: 0.3)",
-)
-@click.option(
-    "--output",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output file path (default: {archive-dir}/analysis/...)",
-)
 @click.pass_context
 def analyze(
     ctx,
     archive_dir: Optional[Path],
-    legacy: bool,
     synthesize: Optional[Path],
-    project: Optional[str],
-    since: Optional[str],
-    patterns_only: bool,
-    min_occurrences: int,
-    min_sessions: int,
-    global_threshold: float,
-    output: Optional[Path],
 ):
     """Analyze archived sessions for patterns and insights.
 
     By default, runs per-project session analysis on hardcoded projects.
     Use --synthesize to run global synthesis on existing analysis files.
-    Use --legacy for the old pattern detection approach.
     """
 
     cfg: Config = ctx.obj["config"]
@@ -475,16 +419,11 @@ def analyze(
 
     if synthesize:
         _run_global_synthesis(ctx, cfg, synthesize)
-    elif legacy:
-        _run_legacy_analyze(
-            ctx, cfg, project, since, patterns_only,
-            min_occurrences, min_sessions, global_threshold, output
-        )
     else:
-        _run_session_analysis(ctx, cfg, output)
+        _run_session_analysis(ctx, cfg)
 
 
-def _run_session_analysis(ctx, cfg: Config, output: Optional[Path]):
+def _run_session_analysis(ctx, cfg: Config):
     """Run per-project session analysis."""
     import asyncio
     from .analyzer.session_analyzer import SessionAnalyzer
@@ -600,113 +539,6 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
             click.echo(f"\nError: {e}")
         else:
             raise
-
-
-def _run_legacy_analyze(
-    ctx,
-    cfg: Config,
-    project: Optional[str],
-    since: Optional[str],
-    patterns_only: bool,
-    min_occurrences: int,
-    min_sessions: int,
-    global_threshold: float,
-    output: Optional[Path],
-):
-    """Run legacy pattern detection analyzer."""
-    import asyncio
-    from .analyzer import (
-        detect_patterns,
-        classify_patterns,
-        render_summary_stdout,
-        write_recommendations,
-    )
-
-    db = Database(cfg.db_path)
-
-    with db:
-        click.echo("Detecting patterns (legacy mode)...")
-        result = detect_patterns(
-            db=db,
-            min_occurrences=min_occurrences,
-            min_sessions=min_sessions,
-            project_filter=project,
-            since=since,
-        )
-
-        # Print summary
-        summary = result["summary"]
-        click.echo(f"\nAnalyzed {summary['total_sessions_analyzed']} sessions across {summary['total_projects']} projects")
-        click.echo("\nPatterns found:")
-        for pattern_type, count in summary["patterns_found"].items():
-            click.echo(f"  {pattern_type}: {count}")
-
-        # Check if there are any patterns to classify
-        total_patterns = sum(summary["patterns_found"].values())
-
-        if patterns_only:
-            # Determine output path
-            if output:
-                output_path = output
-            else:
-                analysis_dir = cfg.archive_dir / "analysis"
-                analysis_dir.mkdir(parents=True, exist_ok=True)
-                timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-                output_path = analysis_dir / f"patterns-{timestamp}.json"
-
-            # Write JSON output
-            with open(output_path, "w") as f:
-                json.dump(result, f, indent=2)
-
-            click.echo(f"\nPatterns written to: {output_path}")
-        elif total_patterns == 0:
-            click.echo("\nNo patterns found to classify.")
-        else:
-            # Run LLM classification
-            click.echo("\nClassifying patterns with Claude...")
-
-            try:
-                classifications = asyncio.run(
-                    classify_patterns(
-                        patterns_result=result,
-                        global_threshold=global_threshold,
-                    )
-                )
-
-                # Print summary to stdout
-                click.echo("")
-                click.echo(render_summary_stdout(
-                    classifications=classifications,
-                    total_sessions=summary["total_sessions_analyzed"],
-                    total_projects=summary["total_projects"],
-                ))
-
-                # Determine output path
-                if output:
-                    output_path = output
-                else:
-                    analysis_dir = cfg.archive_dir / "analysis"
-                    analysis_dir.mkdir(parents=True, exist_ok=True)
-                    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-                    output_path = analysis_dir / f"recommendations-{timestamp}.md"
-
-                # Write markdown output
-                write_recommendations(
-                    classifications=classifications,
-                    output_path=output_path,
-                    total_sessions=summary["total_sessions_analyzed"],
-                    total_projects=summary["total_projects"],
-                    archive_dir=cfg.archive_dir,
-                )
-
-                click.echo(f"\nRecommendations written to: {output_path}")
-
-            except ValueError as e:
-                if "ANTHROPIC_API_KEY" in str(e):
-                    click.echo(f"\nError: {e}")
-                    click.echo("Use --patterns-only to skip LLM classification.")
-                else:
-                    raise
 
 
 if __name__ == "__main__":

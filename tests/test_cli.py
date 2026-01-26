@@ -57,8 +57,8 @@ class TestCli:
         assert result.exit_code == 0
         assert "No archive database found" in result.output
 
-    def test_analyze_legacy_flag_exists(self, runner):
-        """Analyze command should accept --legacy flag."""
+    def test_analyze_synthesize_flag_exists(self, runner):
+        """Analyze command should accept --synthesize flag."""
         result = runner.invoke(main, ["analyze", "--help"])
         assert result.exit_code == 0
-        assert "--legacy" in result.output
+        assert "--synthesize" in result.output

@@ -36,7 +36,7 @@ uv.lock
 *.swo
 
 # Archive data (generated)
-archive/
+/archive/
 
 # OS
 .DS_Store
