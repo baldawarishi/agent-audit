@@ -145,13 +145,16 @@ claude-code-archive stats [--archive-dir PATH]
 ```
 claude-code-archive analyze [--archive-dir PATH] [--project TEXT] [--limit N]
 claude-code-archive analyze --synthesize <analysis-dir>
+claude-code-archive analyze --recommend <synthesis-file>
 ```
 
 Analyzes session transcripts using LLM to identify inefficiencies and generate recommendations.
 
 **Phase 1 (per-project):** Reads TOML transcripts, compares metrics against baselines, categorizes sessions as Ugly/Okay/Good with evidence, identifies root causes of inefficiency.
 
-**Phase 2 (global synthesis):** `--synthesize` reads all per-project analyses, identifies cross-project patterns, quantifies aggregate impact, generates prioritized recommendations.
+**Phase 2 (global synthesis):** `--synthesize` reads all per-project analyses, identifies cross-project patterns, quantifies aggregate impact, generates prioritized recommendations with structured TOML output.
+
+**Phase 3 (recommendations):** `--recommend` parses a synthesis file and generates actionable output files for each recommendation category (CLAUDE.md snippets, skills, hooks, MCP commands, workflows, prompt improvements).
 
 ### `config` - Manage configuration
 ```
@@ -272,7 +275,8 @@ src/claude_code_archive/
 └── analyzer/        # LLM-powered analysis engine
     ├── __init__.py
     ├── claude_client.py      # Async Claude SDK wrapper
-    └── session_analyzer.py   # Per-project + global synthesis orchestration
+    ├── session_analyzer.py   # Per-project + global synthesis orchestration
+    └── recommendations.py    # Parse synthesis → generate actionable outputs
 ```
 
 See `docs/recommendations-design.md` for detailed implementation design.
@@ -301,13 +305,15 @@ See `docs/recommendations-design.md` for detailed implementation design.
 - [x] Global synthesis markdown output
 - [x] Anti-sycophancy prompt design (critical framing, evidence requirements)
 
-### Phase 3c: Actionable Recommendations (future)
-- [ ] Parse recommendations from global synthesis
-- [ ] Generate CLAUDE.md additions
-- [ ] Generate skill definitions (.claude/skills/<name>/SKILL.md)
-- [ ] Generate hook configurations (.claude/settings.json)
-- [ ] Suggest MCP server installations
-- [ ] Track recommendation application
+### Phase 3c: Actionable Recommendations ✓
+- [x] Parse recommendations from global synthesis (TOML block)
+- [x] Generate CLAUDE.md additions
+- [x] Generate skill definitions (.claude/skills/<name>/SKILL.md)
+- [x] Generate hook configurations (.claude/settings.json)
+- [x] Generate MCP server recommendations
+- [x] Generate workflow checklists
+- [x] Generate prompt improvement examples
+- [ ] Track recommendation application (future)
 
 ## Error Handling
 

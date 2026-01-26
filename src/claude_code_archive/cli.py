@@ -396,22 +396,34 @@ def config(ctx, archive_dir: Optional[Path], projects_dir: Optional[Path], show:
     default=None,
     help="Run global synthesis on existing analysis run directory",
 )
+@click.option(
+    "--recommend",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Generate actionable recommendations from a synthesis file",
+)
 @click.pass_context
 def analyze(
     ctx,
     archive_dir: Optional[Path],
     synthesize: Optional[Path],
+    recommend: Optional[Path],
 ):
     """Analyze archived sessions for patterns and insights.
 
     By default, runs per-project session analysis on hardcoded projects.
     Use --synthesize to run global synthesis on existing analysis files.
+    Use --recommend to generate actionable outputs from a synthesis file.
     """
 
     cfg: Config = ctx.obj["config"]
 
     if archive_dir:
         cfg.archive_dir = archive_dir
+
+    if recommend:
+        _run_recommendations(ctx, cfg, recommend)
+        return
 
     if not cfg.db_path.exists():
         click.echo("No archive database found. Run 'sync' first.")
@@ -539,6 +551,52 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
             click.echo(f"\nError: {e}")
         else:
             raise
+
+
+def _run_recommendations(ctx, cfg: Config, synthesis_path: Path):
+    """Generate actionable recommendations from a synthesis file."""
+    from .analyzer.recommendations import (
+        parse_recommendations_from_synthesis,
+        RecommendationGenerator,
+    )
+
+    click.echo("Generating recommendations...")
+    click.echo(f"Synthesis file: {synthesis_path}")
+
+    try:
+        recommendations = parse_recommendations_from_synthesis(synthesis_path)
+    except ValueError as e:
+        click.echo(f"Error parsing synthesis: {e}")
+        return
+
+    if not recommendations:
+        click.echo("No recommendations found in synthesis file.")
+        click.echo(
+            "Ensure the synthesis was generated with the updated prompt "
+            "that includes structured TOML output."
+        )
+        return
+
+    click.echo(f"Found {len(recommendations)} recommendations:")
+    for rec in recommendations:
+        click.echo(f"  - [{rec.category.value}] {rec.title}")
+
+    # Output directory is in same location as synthesis file
+    output_dir = synthesis_path.parent / "recommendations"
+    generator = RecommendationGenerator(output_dir)
+
+    click.echo()
+    click.echo(f"Generating output files to: {output_dir}")
+
+    generated = generator.generate_all(recommendations)
+
+    click.echo()
+    click.echo("Generated files:")
+    for path in generated:
+        click.echo(f"  - {path.name}")
+
+    click.echo()
+    click.echo(f"Done. {len(generated)} files generated.")
 
 
 if __name__ == "__main__":

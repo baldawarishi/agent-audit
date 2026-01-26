@@ -104,12 +104,141 @@ Answer honestly:
 - Total estimated token waste: Z tokens
 - Most impactful pattern: [name] affecting X% of sessions
 
-### 6. Prioritized Recommendations
+### 6. Prioritized Recommendations (Narrative)
 
 Rank by potential impact. Each recommendation must:
 1. Reference a specific cross-project pattern found above
 2. Estimate impact (sessions affected, potential token savings)
 3. Be actionable (not vague like "be more efficient")
+
+### 7. Structured Recommendations (TOML)
+
+After writing the narrative recommendations above, output a TOML block containing machine-parseable recommendations. Each recommendation MUST be categorized into one of these types:
+
+| Category | When to Use | Content Format |
+|----------|-------------|----------------|
+| `claude_md` | Add documentation to CLAUDE.md | Markdown snippet to add |
+| `skill` | Create a custom slash command | SKILL.md file content with frontmatter |
+| `hook` | Add lifecycle event hook | JSON settings.json snippet |
+| `mcp` | Suggest MCP server integration | `claude mcp add` command |
+| `workflow` | Process/workflow guideline | Markdown checklist |
+| `prompt` | User prompting improvement | Before/after examples |
+
+Output format (MUST be valid TOML):
+
+```toml
+[[recommendations]]
+category = "workflow"  # One of: claude_md, skill, hook, mcp, workflow, prompt
+title = "Validate Before Presenting"
+description = "Run sanity checks on outputs before showing the user"
+evidence = [
+    "Pattern 1: Implementation Without Validation (4 sessions, 3 projects)",
+    "java-build-split session 0101325e: data accuracy errors discovered after presentation"
+]
+estimated_impact = 20000  # Token savings estimate (optional)
+priority_score = 8.5  # 0-10 based on impact and actionability
+content = """
+## Validation Checklist
+
+Before presenting any analysis or implementation:
+
+- [ ] Run sanity checks on numerical results
+- [ ] Test with realistic data sizes (not toy examples)
+- [ ] Validate against actual codebase constraints
+"""
+
+[[recommendations]]
+category = "skill"
+title = "Release Workflow Skill"
+description = "Automate the release process as a custom slash command"
+evidence = ["8 sessions followed the same release workflow pattern"]
+estimated_impact = 5000
+priority_score = 7.0
+content = """
+---
+name: release
+description: Prepare and publish a release
+disable-model-invocation: true
+allowed-tools: Bash(npm:*), Bash(git:*), Bash(gh:*)
+---
+
+# Release Workflow
+
+1. Run tests: `npm test`
+2. Bump version: `npm version $ARGUMENTS`
+3. Build: `npm run build`
+4. Create tag and push: `git push --follow-tags`
+5. Create GitHub release: `gh release create`
+"""
+
+[recommendations.metadata]
+skill_name = "release"
+skill_description = "Prepare and publish a release"
+
+[[recommendations]]
+category = "hook"
+title = "Pre-commit Validation Hook"
+description = "Run tests before allowing commits to catch CI failures early"
+evidence = ["6 sessions had commits rejected by CI"]
+estimated_impact = 8000
+priority_score = 6.5
+content = """
+{{
+  "hooks": {{
+    "PreToolUse": [
+      {{
+        "matcher": "Bash",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": ".claude/hooks/validate-commit.sh"
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
+"""
+
+[recommendations.metadata]
+helper_script_path = ".claude/hooks/validate-commit.sh"
+helper_script = """
+#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+
+if [[ "$COMMAND" == git\\ commit* ]]; then
+  npm run lint && npm test || exit 2
+fi
+exit 0
+"""
+
+[[recommendations]]
+category = "prompt"
+title = "Brief Answer Prefix"
+description = "For simple yes/no questions, prefix with 'Brief answer:' to avoid over-investigation"
+evidence = ["Session 31238dcd: 8,716 tokens for simple yes/no question"]
+priority_score = 4.0
+content = """
+### Before
+
+> Is this a bug or expected behavior?
+
+(Claude investigates extensively, produces 2000+ token analysis)
+
+### After
+
+> Brief answer: Is this a bug or expected behavior?
+
+(Claude provides concise 100-200 token response)
+"""
+```
+
+**IMPORTANT**: The TOML block MUST be:
+- Valid TOML syntax (use triple quotes for multi-line content)
+- Placed at the end of your response
+- Contains at least one recommendation for each pattern identified
+- Uses the exact category names: `claude_md`, `skill`, `hook`, `mcp`, `workflow`, `prompt`
 
 ## Anti-Pattern Rules
 

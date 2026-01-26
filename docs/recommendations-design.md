@@ -38,7 +38,7 @@ This document describes how to translate those findings into actionable recommen
 │                          ▼                                       │
 │          archive/analysis/run-{ts}/global-synthesis.md           │
 ├─────────────────────────────────────────────────────────────────┤
-│  Phase 3: Actionable Recommendations (future)                    │
+│  Phase 3: Actionable Recommendations (--recommend)               │
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │ - Parse recommendations from global synthesis               ││
 │  │ - Generate CLAUDE.md additions                              ││
@@ -50,9 +50,10 @@ This document describes how to translate those findings into actionable recommen
 
 ## Current State
 
-Phases 1 and 2 are implemented:
+All three phases are implemented:
 - `claude-code-archive analyze` - runs per-project analysis
-- `claude-code-archive analyze --synthesize <dir>` - runs global synthesis
+- `claude-code-archive analyze --synthesize <dir>` - runs global synthesis with structured TOML output
+- `claude-code-archive analyze --recommend <file>` - generates actionable outputs from synthesis
 
 ## Recommendation Categories
 
@@ -292,23 +293,26 @@ Where actionability_score:
 - Workflow guideline: 5 (process change)
 - Prompt improvement: 3 (requires user behavior change)
 
-## Phase 3 Implementation Plan
+## Phase 3 Implementation (Complete)
 
 ### 3.1 Parse Synthesis Output
 
-Extract structured recommendations from global-synthesis.md:
+The global synthesis prompt now outputs structured TOML recommendations. The parser extracts them:
 
 ```python
 @dataclass
 class Recommendation:
-    category: str  # "claude_md" | "skill" | "hook" | "mcp" | "workflow" | "prompt"
+    category: RecommendationCategory  # enum: claude_md, skill, hook, mcp, workflow, prompt
     title: str
     description: str
-    evidence: list[str]  # File paths and quotes
-    estimated_impact: int  # Token savings
-    priority_score: float
-    output_files: list[str]  # Files to generate
+    evidence: list[str]  # Pattern references and session quotes
+    estimated_impact: Optional[int]  # Token savings estimate
+    priority_score: float  # 0-10 based on impact and actionability
+    content: str  # The actual content to generate
+    metadata: dict  # Category-specific metadata (skill_name, helper_script, etc.)
 ```
+
+Usage: `claude-code-archive analyze --recommend <path/to/global-synthesis.md>`
 
 ### 3.2 Generate Actionable Output
 
