@@ -9,15 +9,22 @@ Archive Claude Code transcripts from `~/.claude/projects/` into SQLite with TOML
 ├── {project-dir}/       ─────────────►     (SQLite)
 │   ├── {uuid}.jsonl                              │
 │   └── agent-{hash}.jsonl                        │
+                                                  │ render
+                                                  ▼
+                                          archive/transcripts/
+                                          └── {project}/{date}-{id}.toml
+                                                  │
                                                   │ analyze
                                                   ▼
-                             render         recommendations.md
-                        ◄─────────────     (checkboxes + reasoning)
-archive/transcripts/                              │
-└── {project}/{date}-{id}.toml            analyze --apply
+                                          archive/analysis/run-{ts}/
+                                          ├── {project}.md      (per-project)
+                                          └── global-synthesis.md
+                                                  │
+                                                  │ (future: apply)
                                                   ▼
                                           ~/.claude/skills/
                                           .claude/skills/
+                                          .claude/settings.json
                                           CLAUDE.md updates
 ```
 
@@ -136,11 +143,15 @@ claude-code-archive stats [--archive-dir PATH]
 
 ### `analyze` - Generate workflow recommendations
 ```
-claude-code-archive analyze [--archive-dir PATH] [--project TEXT] [--since DATE] [--output PATH]
-claude-code-archive analyze --apply PATH
+claude-code-archive analyze [--archive-dir PATH] [--project TEXT] [--limit N]
+claude-code-archive analyze --synthesize <analysis-dir>
 ```
 
-Analyzes archive to surface actionable recommendations for skills, hooks, CLAUDE.md, and permissions. Outputs markdown with checkboxes; user reviews and selects; `--apply` executes selected items.
+Analyzes session transcripts using LLM to identify inefficiencies and generate recommendations.
+
+**Phase 1 (per-project):** Reads TOML transcripts, compares metrics against baselines, categorizes sessions as Ugly/Okay/Good with evidence, identifies root causes of inefficiency.
+
+**Phase 2 (global synthesis):** `--synthesize` reads all per-project analyses, identifies cross-project patterns, quantifies aggregate impact, generates prioritized recommendations.
 
 ### `config` - Manage configuration
 ```
@@ -149,99 +160,101 @@ claude-code-archive config [--archive-dir PATH] [--projects-dir PATH] [--show]
 
 ## Analyze Command
 
-### Workflow
-1. `analyze` scans archive, detects patterns, outputs `recommendations.md`
-2. User reviews recommendations with reasoning, checks boxes for ones to apply
-3. `analyze --apply recommendations.md` generates skills/hooks/docs for checked items
+### Analysis Pipeline
+
+```
+Phase 1: Per-Project Analysis
+┌─────────────────────────────────────────────────────────────┐
+│ For each project:                                           │
+│ - Read session transcripts from TOML files                  │
+│ - Compare metrics against global baselines                  │
+│ - Identify Ugly/Okay/Good sessions with evidence            │
+│ - Quantify token waste and root causes                      │
+└─────────────────────────────────────────────────────────────┘
+                         ▼
+         archive/analysis/run-{ts}/{project}.md
+
+Phase 2: Global Synthesis (--synthesize)
+┌─────────────────────────────────────────────────────────────┐
+│ - Read all per-project analysis files                       │
+│ - Identify cross-project patterns                           │
+│ - Quantify aggregate impact                                 │
+│ - Generate prioritized recommendations                      │
+└─────────────────────────────────────────────────────────────┘
+                         ▼
+         archive/analysis/run-{ts}/global-synthesis.md
+
+Phase 3: Actionable Recommendations (future)
+┌─────────────────────────────────────────────────────────────┐
+│ - Parse recommendations from global synthesis               │
+│ - Generate CLAUDE.md additions                              │
+│ - Create skill definitions                                  │
+│ - Suggest hook configurations                               │
+│ - Track recommendation application                          │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ### Recommendation Categories
 
-#### Skill Opportunities
-Detect repeated patterns that could become skills:
-- **Tool sequences**: Same tools called in same order across sessions
-- **Prompt patterns**: Similar user messages appearing multiple times
-- **Successful agent forks**: Sub-agent patterns that complete successfully
+#### 1. CLAUDE.md Additions
+Documentation that helps Claude understand project context upfront.
+- Same file read 10+ times across sessions
+- Same questions asked repeatedly
+- Project-specific patterns that require explanation
 
-#### Scope Detection
-| Signal | Target Location |
-|--------|-----------------|
-| Pattern in 50%+ of projects | `~/.claude/skills/` (global) |
-| Pattern only in one project | `.claude/skills/` (project) |
-| Pattern only in one directory | `subdir/.claude/skills/` |
-| Repeated user explanation across projects | `~/.claude/CLAUDE.md` |
-| Project-specific convention | `project/CLAUDE.md` |
+#### 2. Workflow Guidelines
+Process improvements based on identified inefficiencies.
+- Pattern of backtracking or corrections
+- Validation failures discovered late
+- Requirements misunderstandings
 
-#### Permission Friction
-Identify tool calls that always succeed but require approval:
-- Track approval/denial/error rates per tool pattern
-- Suggest `allowed-tools` additions for high-approval patterns
-- Distinguish global vs project-specific permissions
+#### 3. Skills
+Custom slash commands that automate repetitive multi-step workflows.
+- Same sequence of tool calls repeated across 5+ sessions
+- Multi-step workflow with consistent pattern
+- Project-specific commands that Claude needs to learn
 
-#### Hook Candidates
-- **PreToolUse**: Tool calls with high error rates → validation hooks
-- **PostToolUse**: Missing follow-up actions (e.g., edit model.py but no migration)
-- **Blocking**: Dangerous patterns (rm -rf, writing to .env)
+Skills are stored in `.claude/skills/<name>/SKILL.md` with frontmatter options:
+- `name`, `description`, `disable-model-invocation`, `allowed-tools`, `context`, `agent`
 
-#### CLAUDE.md Gaps
-- Files read repeatedly across sessions → document in context
-- Repeated user explanations → capture once
-- Tool errors from unknown conventions → document the convention
+#### 4. Hooks
+Shell commands that run at specific lifecycle events.
+- Validation errors caught late that could be caught early
+- Consistent post-action steps (e.g., always format after edit)
+- Policy enforcement (e.g., never commit to main)
 
-#### Agent Efficiency
-- Agent spawn depth vs success rate
-- Sessions with no meaningful output
-- Patterns where parent could have done work directly
+Hook events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionStart`
 
-### Recommendation Format
-```markdown
-## Skill Opportunities
+#### 5. Prompt Improvements
+Suggestions for how users can prompt more effectively.
+- Ambiguous requirements led to rework
+- User had to provide multiple corrections
+- Simple questions received over-engineered answers
 
-- [ ] **commit-workflow** [GLOBAL ~/.claude/skills/]
+#### 6. MCP Server Suggestions
+External tool integrations that could improve workflows.
+- Repeated manual lookups that an MCP could automate
+- Integration with external services (Jira, Linear, Sentry, etc.)
+- Database or API access patterns
 
-  Seen: 52 times across 9 projects
-  Sequence: `git status` → `git diff` → confirm → `git add` → `git commit`
-  Reasoning: Appears in 85% of projects with identical flow. ~4 turns saved per use.
+### Priority Scoring
+Recommendations ranked by: sessions affected, token waste, projects affected, actionability.
 
-  <details><summary>Generated SKILL.md</summary>
+### Output Locations
 
-  ```yaml
-  ---
-  name: commit-workflow
-  description: Stage and commit changes with review. Use when committing code.
-  allowed-tools: Bash(git *)
-  ---
-  ```
-  </details>
+- Analysis output: `archive/analysis/run-{timestamp}/`
+- Per-project files: `archive/analysis/run-{timestamp}/{project}.md`
+- Global synthesis: `archive/analysis/run-{timestamp}/global-synthesis.md`
 
-- [ ] **django-endpoint** [PROJECT my-api/.claude/skills/]
-
-  Seen: 12 times, only in my-api
-  Reasoning: Uses Django conventions specific to this repo. Not seen in 8 other Python projects.
-
-## Permission Friction
-
-- [ ] **Bash(npm install*)** [GLOBAL]
-
-  89 approvals, 0 denials, 0 errors
-  Reasoning: Always approved. Add to global allowed-tools.
-
-## CLAUDE.md Gaps
-
-- [ ] **Document src/core/config.py** [PROJECT my-api/CLAUDE.md]
-
-  Read 41 times across 15 sessions
-  Reasoning: Claude re-reads constantly. Extract key configs to CLAUDE.md.
-```
-
-### Apply Logic
-When `--apply` is run:
-1. Parse markdown, find checked items
-2. For each checked item:
-   - Skills: Create `SKILL.md` in target location
-   - Permissions: Append to existing skill or create permissions skill
-   - CLAUDE.md: Append section to appropriate file (create if needed)
-   - Hooks: Add to `.claude/settings.json` or prompt for hook script location
-3. Report what was created/modified
+### Apply Logic (Future)
+When Phase 3 is implemented:
+1. Parse recommendations from global synthesis
+2. For each recommendation:
+   - CLAUDE.md: Output markdown snippet ready to copy-paste
+   - Skills: Generate complete `.claude/skills/<name>/SKILL.md`
+   - Hooks: Generate `.claude/settings.json` additions with helper scripts
+   - MCP: Provide `claude mcp add` command with config
+3. Track which recommendations have been applied in `archive/recommendations/applied.json`
 
 ## Module Structure
 
@@ -253,15 +266,16 @@ src/claude_code_archive/
 ├── models.py        # Dataclasses
 ├── parser.py        # JSONL parsing
 ├── toml_renderer.py # TOML generation
-└── analyzer/        # Pattern detection + recommendation generation
+├── prompts/         # Analysis prompt templates
+│   ├── session_analysis.md   # Per-project analysis prompt
+│   └── global_synthesis.md   # Cross-project synthesis prompt
+└── analyzer/        # LLM-powered analysis engine
     ├── __init__.py
-    ├── patterns.py      # Phase 1: pattern detection
-    ├── classifier.py    # Phase 2: LLM classification
-    ├── claude_client.py # Claude SDK wrapper
-    └── renderer.py      # Markdown output generation
+    ├── claude_client.py      # Async Claude SDK wrapper
+    └── session_analyzer.py   # Per-project + global synthesis orchestration
 ```
 
-See `docs/analyzer-design.md` for detailed implementation design.
+See `docs/recommendations-design.md` for detailed implementation design.
 
 ## Completed Work
 
@@ -272,27 +286,28 @@ See `docs/analyzer-design.md` for detailed implementation design.
 
 ## Phase 3: Workflow Analysis (Current)
 
-### Phase 3a: Detection & Output (no LLM) ✓
+### Phase 3a: Per-Project Analysis ✓
 - [x] Create `analyzer/` subpackage structure
-- [x] Tool sequence detection (3-grams with Bash depth-2 normalization)
-- [x] Prompt pattern detection (prefix + sub-section phrases)
-- [x] File access pattern detection
-- [x] Sequence merging for overlapping patterns
-- [x] Pretty JSON output for `--patterns-only`
-- [x] CLI command with configurable thresholds
+- [x] Async Claude SDK client wrapper
+- [x] Session analysis prompt template (Jinja2)
+- [x] Metrics comparison against global baselines
+- [x] Session categorization (Ugly/Okay/Good) with evidence
+- [x] Per-project markdown output
 
-### Phase 3b: LLM Classification ✓
-- [x] Classification prompt template with few-shot examples
-- [x] Claude SDK client wrapper (async)
-- [x] Scope detection (global 30% / project / subfolder)
-- [x] Recommendation markdown generation by scope
-- [x] Confidence scoring (high/medium/low)
+### Phase 3b: Global Synthesis ✓
+- [x] Cross-project pattern identification
+- [x] Aggregate impact quantification
+- [x] Prioritized recommendation generation
+- [x] Global synthesis markdown output
+- [x] Anti-sycophancy prompt design (critical framing, evidence requirements)
 
-### Phase 3c: Apply Logic (future)
-- [ ] Checkbox parsing
-- [ ] Skill generation
-- [ ] CLAUDE.md updates
-- [ ] Hook suggestions
+### Phase 3c: Actionable Recommendations (future)
+- [ ] Parse recommendations from global synthesis
+- [ ] Generate CLAUDE.md additions
+- [ ] Generate skill definitions (.claude/skills/<name>/SKILL.md)
+- [ ] Generate hook configurations (.claude/settings.json)
+- [ ] Suggest MCP server installations
+- [ ] Track recommendation application
 
 ## Error Handling
 
@@ -307,6 +322,6 @@ See `docs/analyzer-design.md` for detailed implementation design.
 1. Parser tests: All entry types, content blocks
 2. Database tests: CRUD, schema, incremental sync
 3. Renderer tests: TOML format validation
-4. Analyzer tests: Pattern detection, scope inference, markdown generation
-5. Apply tests: File generation, conflict handling
-6. Integration: Full sync → analyze → apply cycle
+4. Analyzer tests: Session analysis, Claude client mocking, markdown generation
+5. Apply tests: File generation, conflict handling (future)
+6. Integration: Full sync → render → analyze cycle
