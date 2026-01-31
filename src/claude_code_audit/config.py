@@ -4,14 +4,16 @@ import json
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_CONFIG_DIR = Path.home() / ".config" / "claude-code-audit"
+PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent # TODO fix this 
+
+DEFAULT_CONFIG_DIR = PACKAGE_ROOT / ".config" / "claude-code-audit"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.json"
 DEFAULT_CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
 def get_default_archive_dir() -> Path:
     """Get the default archive directory."""
-    return Path.home() / "Development" / "claude-code-audit" / "archive"
+    return PACKAGE_ROOT  / "archive"
 
 
 class Config:

@@ -7,7 +7,7 @@ Inspired by [simonw/claude-code-transcripts](https://github.com/simonw/claude-co
 ## Installation
 
 ```bash
-cd ~/Development/claude-code-audit
+cd claude-code-audit
 uv sync
 ```
 
