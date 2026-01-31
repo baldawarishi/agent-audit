@@ -1,7 +1,5 @@
 """Tests for recommendations module."""
 
-from pathlib import Path
-
 import pytest
 
 from claude_code_audit.analyzer.recommendations import (
@@ -156,7 +154,7 @@ content = """
 
     def test_parse_multiple_recommendations(self, tmp_path):
         """Parse multiple recommendations from TOML block."""
-        synthesis_content = '''# Synthesis
+        synthesis_content = """# Synthesis
 
 ```toml
 [[recommendations]]
@@ -169,7 +167,7 @@ category = "skill"
 title = "Second"
 description = "Second recommendation"
 ```
-'''
+"""
         synthesis_path = tmp_path / "global-synthesis.md"
         synthesis_path.write_text(synthesis_content)
 
@@ -181,7 +179,7 @@ description = "Second recommendation"
 
     def test_parse_with_metadata(self, tmp_path):
         """Parse recommendations with metadata section."""
-        synthesis_content = '''# Synthesis
+        synthesis_content = """# Synthesis
 
 ```toml
 [[recommendations]]
@@ -194,7 +192,7 @@ content = "SKILL content"
 skill_name = "release"
 skill_description = "Automate releases"
 ```
-'''
+"""
         synthesis_path = tmp_path / "global-synthesis.md"
         synthesis_path.write_text(synthesis_content)
 
@@ -214,13 +212,13 @@ skill_description = "Automate releases"
 
     def test_parse_invalid_toml(self, tmp_path):
         """Raise error for invalid TOML syntax."""
-        synthesis_content = '''# Synthesis
+        synthesis_content = """# Synthesis
 
 ```toml
 [[recommendations]
 invalid toml syntax here
 ```
-'''
+"""
         synthesis_path = tmp_path / "global-synthesis.md"
         synthesis_path.write_text(synthesis_content)
 
@@ -229,7 +227,7 @@ invalid toml syntax here
 
     def test_parse_unknown_category_defaults_to_workflow(self, tmp_path):
         """Unknown category defaults to workflow."""
-        synthesis_content = '''# Synthesis
+        synthesis_content = """# Synthesis
 
 ```toml
 [[recommendations]]
@@ -237,7 +235,7 @@ category = "unknown_category"
 title = "Test"
 description = "Test"
 ```
-'''
+"""
         synthesis_path = tmp_path / "global-synthesis.md"
         synthesis_path.write_text(synthesis_content)
 

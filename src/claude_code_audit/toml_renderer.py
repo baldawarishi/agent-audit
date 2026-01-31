@@ -21,7 +21,9 @@ def escape_toml_string(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-def render_tool_call_toml(tool_call: ToolCall, result_content: Optional[str] = None) -> list[str]:
+def render_tool_call_toml(
+    tool_call: ToolCall, result_content: Optional[str] = None
+) -> list[str]:
     """Render a tool call as TOML lines."""
     lines = []
     lines.append("[[turns.assistant.tool_calls]]")
@@ -112,9 +114,16 @@ def render_session_toml(session: Session) -> str:
 
     def flush_turn():
         nonlocal turn_number, current_user_content, current_user_timestamp
-        nonlocal pending_assistant_content, pending_assistant_thinking, pending_tool_calls
+        nonlocal \
+            pending_assistant_content, \
+            pending_assistant_thinking, \
+            pending_tool_calls
 
-        if current_user_content is None and not pending_assistant_content and not pending_tool_calls:
+        if (
+            current_user_content is None
+            and not pending_assistant_content
+            and not pending_tool_calls
+        ):
             return
 
         turn_number += 1

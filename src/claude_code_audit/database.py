@@ -380,22 +380,20 @@ class Database:
         cursor = conn.execute("SELECT COUNT(*) as count FROM commits")
         stats["total_commits"] = cursor.fetchone()["count"]
 
-        cursor = conn.execute(
-            "SELECT SUM(total_input_tokens) as total FROM sessions"
-        )
+        cursor = conn.execute("SELECT SUM(total_input_tokens) as total FROM sessions")
         row = cursor.fetchone()
         stats["total_input_tokens"] = row["total"] or 0
 
-        cursor = conn.execute(
-            "SELECT SUM(total_output_tokens) as total FROM sessions"
-        )
+        cursor = conn.execute("SELECT SUM(total_output_tokens) as total FROM sessions")
         row = cursor.fetchone()
         stats["total_output_tokens"] = row["total"] or 0
 
         cursor = conn.execute("SELECT DISTINCT project FROM sessions")
         stats["projects"] = [row["project"] for row in cursor.fetchall()]
 
-        cursor = conn.execute("SELECT DISTINCT github_repo FROM sessions WHERE github_repo IS NOT NULL")
+        cursor = conn.execute(
+            "SELECT DISTINCT github_repo FROM sessions WHERE github_repo IS NOT NULL"
+        )
         stats["github_repos"] = [row["github_repo"] for row in cursor.fetchall()]
 
         return stats

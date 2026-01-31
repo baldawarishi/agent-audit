@@ -97,13 +97,13 @@ def _extract_toml_blocks(content: str) -> list[str]:
 
         while scan_pos < len(content):
             # Check for triple quote (""")
-            if content[scan_pos:scan_pos + 3] == '"""':
+            if content[scan_pos : scan_pos + 3] == '"""':
                 in_triple_quote = not in_triple_quote
                 scan_pos += 3
                 continue
 
             # Check for closing fence ``` (only valid if not in triple quote)
-            if not in_triple_quote and content[scan_pos:scan_pos + 4] == '\n```':
+            if not in_triple_quote and content[scan_pos : scan_pos + 4] == "\n```":
                 # Verify this isn't a language specifier like ```python
                 after_fence = scan_pos + 4
                 if after_fence >= len(content):
@@ -263,7 +263,9 @@ class RecommendationGenerator:
             output += f"- {e}\n"
 
         if rec.estimated_impact:
-            output += f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            output += (
+                f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            )
 
         path = self.output_dir / rec.output_filename
         path.write_text(output)
@@ -294,7 +296,9 @@ Create `.claude/skills/{skill_name}/SKILL.md`:
             output += f"- {e}\n"
 
         if rec.estimated_impact:
-            output += f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            output += (
+                f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            )
 
         path = self.output_dir / rec.output_filename
         path.write_text(output)
@@ -323,14 +327,16 @@ Add to `.claude/settings.json`:
             output += f"- {e}\n"
 
         if rec.estimated_impact:
-            output += f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            output += (
+                f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            )
 
         # Check for helper script in metadata
         if helper_script := rec.metadata.get("helper_script"):
             output += f"""
 ## Helper Script
 
-{rec.metadata.get('helper_script_path', 'Create helper script')}:
+{rec.metadata.get("helper_script_path", "Create helper script")}:
 
 ```bash
 {helper_script}
@@ -394,7 +400,9 @@ Add to `.claude/settings.json`:
             output += f"- {e}\n"
 
         if rec.estimated_impact:
-            output += f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            output += (
+                f"\n## Estimated Impact\n\n~{rec.estimated_impact:,} tokens saved\n"
+            )
 
         path = self.output_dir / rec.output_filename
         path.write_text(output)

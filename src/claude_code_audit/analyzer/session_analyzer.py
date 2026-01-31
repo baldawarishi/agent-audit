@@ -54,7 +54,9 @@ def load_best_practices_reference() -> str:
     Returns:
         The best practices reference content.
     """
-    template_path = Path(__file__).parent.parent / "prompts" / "best_practices_reference.md"
+    template_path = (
+        Path(__file__).parent.parent / "prompts" / "best_practices_reference.md"
+    )
     return template_path.read_text()
 
 
@@ -64,7 +66,9 @@ def load_validation_template() -> str:
     Returns:
         The template string with placeholders.
     """
-    template_path = Path(__file__).parent.parent / "prompts" / "best_practices_validation.md"
+    template_path = (
+        Path(__file__).parent.parent / "prompts" / "best_practices_validation.md"
+    )
     return template_path.read_text()
 
 
@@ -274,7 +278,8 @@ class SessionAnalyzer:
         """
         # Find all .md files except synthesis and validation outputs
         analysis_files = [
-            f for f in sorted(analysis_dir.glob("*.md"))
+            f
+            for f in sorted(analysis_dir.glob("*.md"))
             if f.name.lower() not in ("global-synthesis.md", "validation-report.md")
         ]
 

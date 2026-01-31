@@ -62,7 +62,9 @@ def extract_thinking_content(content) -> str | None:
     return "\n".join(thinking_parts) if thinking_parts else None
 
 
-def extract_tool_calls(content, message_id: str, session_id: str, timestamp: str) -> list[ToolCall]:
+def extract_tool_calls(
+    content, message_id: str, session_id: str, timestamp: str
+) -> list[ToolCall]:
     """Extract tool calls from message content."""
     tool_calls = []
     if isinstance(content, list):
@@ -92,7 +94,9 @@ def extract_tool_results(content, session_id: str, timestamp: str) -> list[ToolR
                         id=str(uuid.uuid4()),
                         tool_call_id=block.get("tool_use_id", ""),
                         session_id=session_id,
-                        content=str(block.get("content", ""))[:10000],  # Truncate large results
+                        content=str(block.get("content", ""))[
+                            :10000
+                        ],  # Truncate large results
                         is_error=block.get("is_error", False),
                         timestamp=timestamp,
                     )
@@ -263,7 +267,11 @@ def parse_session(file_path: Path, project_name: str) -> Session:
         # (agentId is the agent's own ID, same as filename suffix)
         # Only set parent if sessionId differs from own ID (regular sessions have sessionId == own ID)
         entry_session_id = entry.get("sessionId")
-        if not session.parent_session_id and entry_session_id and entry_session_id != session_id:
+        if (
+            not session.parent_session_id
+            and entry_session_id
+            and entry_session_id != session_id
+        ):
             session.parent_session_id = entry_session_id
 
         # Extract summary from summary-type entries
@@ -299,8 +307,12 @@ def parse_session(file_path: Path, project_name: str) -> Session:
 
         # Skip system command messages
         content = message_data.get("content", "")
-        text_content = extract_text_content(content) if isinstance(content, list) else content
-        if isinstance(text_content, str) and text_content.strip().startswith(("<command-name>", "<local-command-")):
+        text_content = (
+            extract_text_content(content) if isinstance(content, list) else content
+        )
+        if isinstance(text_content, str) and text_content.strip().startswith(
+            ("<command-name>", "<local-command-")
+        ):
             continue
 
         # Update session timestamps
@@ -370,12 +382,16 @@ def parse_session(file_path: Path, project_name: str) -> Session:
             model=model,
             input_tokens=input_tokens if input_tokens else None,
             output_tokens=output_tokens if output_tokens else None,
-            thinking=extract_thinking_content(content) if msg_type == "assistant" else None,
+            thinking=extract_thinking_content(content)
+            if msg_type == "assistant"
+            else None,
             stop_reason=message_data.get("stop_reason"),
             is_sidechain=entry.get("isSidechain", False),
             is_compact_summary=is_compact_summary,
             has_images=msg_has_images,
-            tool_calls=extract_tool_calls(content, msg_uuid, session_id, timestamp) if msg_type == "assistant" else [],
+            tool_calls=extract_tool_calls(content, msg_uuid, session_id, timestamp)
+            if msg_type == "assistant"
+            else [],
         )
         messages.append(message)
 
@@ -412,7 +428,11 @@ def discover_sessions(projects_dir: Path) -> Iterator[tuple[Path, str]]:
 
         # Convert directory name to project name
         # e.g., "-Users-rishibaldawa-Development-myproject" -> "myproject"
-        project_name = project_dir.name.split("-")[-1] if "-" in project_dir.name else project_dir.name
+        project_name = (
+            project_dir.name.split("-")[-1]
+            if "-" in project_dir.name
+            else project_dir.name
+        )
 
         # Also try to get a better name from the path
         parts = project_dir.name.replace("-", "/").lstrip("/")
@@ -476,15 +496,25 @@ def get_project_name_from_dir(dir_name: str) -> str:
     name = dir_name
     for prefix in prefixes_to_strip:
         if name.lower().startswith(prefix.lower()):
-            name = name[len(prefix):]
+            name = name[len(prefix) :]
             break
 
     # Split on dashes and find meaningful parts
     parts = name.split("-")
 
     # Common intermediate directories to skip
-    skip_dirs = {"projects", "code", "repos", "src", "dev", "work", "documents",
-                 "development", "github", "git"}
+    skip_dirs = {
+        "projects",
+        "code",
+        "repos",
+        "src",
+        "dev",
+        "work",
+        "documents",
+        "development",
+        "github",
+        "git",
+    }
 
     # Find meaningful parts (after skipping username and common dirs)
     meaningful_parts = []
@@ -496,7 +526,7 @@ def get_project_name_from_dir(dir_name: str) -> str:
         # Skip the first part if it looks like a username (before common dirs)
         if i == 0 and not found_project:
             # Check if next parts contain common dirs
-            remaining = [p.lower() for p in parts[i + 1:]]
+            remaining = [p.lower() for p in parts[i + 1 :]]
             if any(d in remaining for d in skip_dirs):
                 continue
         if part.lower() in skip_dirs:

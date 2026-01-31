@@ -284,7 +284,9 @@ class TestSessionAnalyzerGlobalSynthesis:
     def mock_client(self):
         """Create a mock Claude client."""
         client = MagicMock()
-        client.query = AsyncMock(return_value="# Global Synthesis\n\nCross-project patterns")
+        client.query = AsyncMock(
+            return_value="# Global Synthesis\n\nCross-project patterns"
+        )
         return client
 
     @pytest.fixture
@@ -320,7 +322,9 @@ class TestSessionAnalyzerGlobalSynthesis:
         assert result == "# Global Synthesis\n\nCross-project patterns"
 
     @pytest.mark.asyncio
-    async def test_synthesize_global_excludes_non_md_files(self, mock_client, mock_db, tmp_path):
+    async def test_synthesize_global_excludes_non_md_files(
+        self, mock_client, mock_db, tmp_path
+    ):
         """Global synthesis only includes .md files."""
         analysis_dir = tmp_path / "analysis" / "run-123"
         analysis_dir.mkdir(parents=True)
@@ -343,7 +347,9 @@ class TestSessionAnalyzerGlobalSynthesis:
         assert "global-synthesis.md" not in prompt_arg
 
     @pytest.mark.asyncio
-    async def test_synthesize_global_empty_directory(self, mock_client, mock_db, tmp_path):
+    async def test_synthesize_global_empty_directory(
+        self, mock_client, mock_db, tmp_path
+    ):
         """Global synthesis raises error on empty directory."""
         analysis_dir = tmp_path / "analysis" / "run-123"
         analysis_dir.mkdir(parents=True)

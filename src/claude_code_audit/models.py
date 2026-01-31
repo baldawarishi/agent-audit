@@ -95,4 +95,6 @@ class Session:
     messages: list[Message] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
-    commits: list[Commit] = field(default_factory=list)  # Git commits extracted from tool results
+    commits: list[Commit] = field(
+        default_factory=list
+    )  # Git commits extracted from tool results

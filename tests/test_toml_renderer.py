@@ -106,12 +106,12 @@ def sample_session():
 class TestRenderSessionToml:
     def test_renders_session_header(self, sample_session):
         toml = render_session_toml(sample_session)
-        assert '[session]' in toml
+        assert "[session]" in toml
         assert 'id = "test-session-123"' in toml
         assert 'project = "test-project"' in toml
         assert 'model = "claude-opus-4-5-20251101"' in toml
-        assert 'input_tokens = 100' in toml
-        assert 'output_tokens = 50' in toml
+        assert "input_tokens = 100" in toml
+        assert "output_tokens = 50" in toml
 
     def test_renders_slug(self, sample_session):
         toml = render_session_toml(sample_session)
@@ -128,26 +128,26 @@ class TestRenderSessionToml:
 
     def test_renders_turns(self, sample_session):
         toml = render_session_toml(sample_session)
-        assert '[[turns]]' in toml
-        assert 'number = 1' in toml
-        assert '[turns.user]' in toml
-        assert 'What files are here?' in toml
+        assert "[[turns]]" in toml
+        assert "number = 1" in toml
+        assert "[turns.user]" in toml
+        assert "What files are here?" in toml
 
     def test_renders_assistant_content(self, sample_session):
         toml = render_session_toml(sample_session)
-        assert '[turns.assistant]' in toml
-        assert 'Let me check.' in toml
+        assert "[turns.assistant]" in toml
+        assert "Let me check." in toml
 
     def test_renders_tool_calls(self, sample_session):
         toml = render_session_toml(sample_session)
-        assert '[[turns.assistant.tool_calls]]' in toml
+        assert "[[turns.assistant.tool_calls]]" in toml
         assert 'tool = "Bash"' in toml
-        assert 'ls -la' in toml
+        assert "ls -la" in toml
 
     def test_renders_tool_results(self, sample_session):
         toml = render_session_toml(sample_session)
-        assert '[turns.assistant.tool_calls.result]' in toml
-        assert 'file1.txt' in toml
+        assert "[turns.assistant.tool_calls.result]" in toml
+        assert "file1.txt" in toml
 
     def test_handles_multiline_content(self):
         session = Session(
@@ -181,7 +181,7 @@ class TestRenderSessionToFile:
             assert "test-ses" in str(result)  # Short ID (8 chars)
 
             content = result.read_text()
-            assert '[session]' in content
+            assert "[session]" in content
 
     def test_creates_project_subdirectory(self, sample_session):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -8,7 +8,12 @@ import click
 
 from .config import Config
 from .database import Database
-from .parser import discover_sessions, get_project_name_from_dir, parse_session, is_tmp_directory
+from .parser import (
+    discover_sessions,
+    get_project_name_from_dir,
+    parse_session,
+    is_tmp_directory,
+)
 from .toml_renderer import render_session_to_file as render_toml_file
 from .toml_renderer import render_session_toml
 
@@ -68,7 +73,16 @@ def main(ctx, config: Optional[Path]):
     help="Include warmup/sidechain sessions (excluded by default)",
 )
 @click.pass_context
-def sync(ctx, projects_dir: Optional[Path], archive_dir: Optional[Path], project: str, force: bool, include_tmp_directories: bool, no_toml: bool, include_warmup: bool):
+def sync(
+    ctx,
+    projects_dir: Optional[Path],
+    archive_dir: Optional[Path],
+    project: str,
+    force: bool,
+    include_tmp_directories: bool,
+    no_toml: bool,
+    include_warmup: bool,
+):
     """Sync sessions from Claude projects to the archive."""
     cfg: Config = ctx.obj["config"]
 
@@ -188,7 +202,14 @@ def sync(ctx, projects_dir: Optional[Path], archive_dir: Optional[Path], project
     help="Output to stdout instead of files",
 )
 @click.pass_context
-def render(ctx, archive_dir: Optional[Path], output_dir: Optional[Path], session_id: str, project: str, stdout: bool):
+def render(
+    ctx,
+    archive_dir: Optional[Path],
+    output_dir: Optional[Path],
+    session_id: str,
+    project: str,
+    stdout: bool,
+):
     """Render sessions as TOML transcripts."""
     cfg: Config = ctx.obj["config"]
 
@@ -226,21 +247,23 @@ def render(ctx, archive_dir: Optional[Path], output_dir: Optional[Path], session
 
             messages: list[Message] = []
             for msg in db.get_messages_for_session(session_dict["id"]):
-                messages.append(Message(
-                    id=msg["id"],
-                    session_id=msg["session_id"],
-                    type=msg["type"],
-                    timestamp=msg["timestamp"],
-                    content=msg["content"] or "",
-                    parent_uuid=msg["parent_uuid"],
-                    model=msg["model"],
-                    input_tokens=msg["input_tokens"],
-                    output_tokens=msg["output_tokens"],
-                    thinking=msg.get("thinking"),
-                    stop_reason=msg.get("stop_reason"),
-                    is_sidechain=bool(msg.get("is_sidechain", False)),
-                    tool_calls=[],
-                ))
+                messages.append(
+                    Message(
+                        id=msg["id"],
+                        session_id=msg["session_id"],
+                        type=msg["type"],
+                        timestamp=msg["timestamp"],
+                        content=msg["content"] or "",
+                        parent_uuid=msg["parent_uuid"],
+                        model=msg["model"],
+                        input_tokens=msg["input_tokens"],
+                        output_tokens=msg["output_tokens"],
+                        thinking=msg.get("thinking"),
+                        stop_reason=msg.get("stop_reason"),
+                        is_sidechain=bool(msg.get("is_sidechain", False)),
+                        tool_calls=[],
+                    )
+                )
 
             tool_calls = []
             for tc in db.get_tool_calls_for_session(session_dict["id"]):
@@ -261,14 +284,16 @@ def render(ctx, archive_dir: Optional[Path], output_dir: Optional[Path], session
 
             tool_results = []
             for tr in db.get_tool_results_for_session(session_dict["id"]):
-                tool_results.append(ToolResult(
-                    id=tr["id"],
-                    tool_call_id=tr["tool_call_id"],
-                    session_id=tr["session_id"],
-                    content=tr["content"] or "",
-                    is_error=bool(tr["is_error"]),
-                    timestamp=tr["timestamp"],
-                ))
+                tool_results.append(
+                    ToolResult(
+                        id=tr["id"],
+                        tool_call_id=tr["tool_call_id"],
+                        session_id=tr["session_id"],
+                        content=tr["content"] or "",
+                        is_error=bool(tr["is_error"]),
+                        timestamp=tr["timestamp"],
+                    )
+                )
 
             session = Session(
                 id=session_dict["id"],
@@ -411,7 +436,7 @@ def analyze(
 ):
     """Analyze archived sessions for patterns and insights.
 
-    By default, runs per-project session analysis on hardcoded projects.
+    By default, runs per-project session analysis on all projects in the database.
     Use --synthesize to run global synthesis on existing analysis files.
     Use --recommend to generate actionable outputs from a synthesis file.
     """
@@ -474,7 +499,9 @@ def _run_session_analysis(ctx, cfg: Config):
                         click.echo("  Skipping (no sessions)")
                         continue
 
-                    click.echo(f"  Sessions: {metrics['session_count']}, Turns: {metrics['turn_count']}")
+                    click.echo(
+                        f"  Sessions: {metrics['session_count']}, Turns: {metrics['turn_count']}"
+                    )
 
                     try:
                         result = await analyzer.analyze_project(project)
@@ -507,7 +534,7 @@ def _parse_validation_toml(validation_content: str) -> Optional[dict]:
     if toml_start == -1 or toml_end == -1:
         return None
 
-    toml_content = validation_content[toml_start + 8:toml_end]
+    toml_content = validation_content[toml_start + 8 : toml_end]
 
     # Try parsing full content first
     try:
@@ -566,14 +593,20 @@ def _extract_toml_from_synthesis(synthesis_content: str) -> Optional[str]:
     in_triple_quote = False
 
     while scan_pos < len(synthesis_content):
-        if synthesis_content[scan_pos:scan_pos + 3] == '"""':
+        if synthesis_content[scan_pos : scan_pos + 3] == '"""':
             in_triple_quote = not in_triple_quote
             scan_pos += 3
             continue
 
-        if not in_triple_quote and synthesis_content[scan_pos:scan_pos + 4] == '\n```':
+        if (
+            not in_triple_quote
+            and synthesis_content[scan_pos : scan_pos + 4] == "\n```"
+        ):
             after_fence = scan_pos + 4
-            if after_fence >= len(synthesis_content) or not synthesis_content[after_fence].isalpha():
+            if (
+                after_fence >= len(synthesis_content)
+                or not synthesis_content[after_fence].isalpha()
+            ):
                 return synthesis_content[block_start:scan_pos]
 
         scan_pos += 1
@@ -593,19 +626,25 @@ def _replace_toml_in_synthesis(synthesis_content: str, new_toml: str) -> str:
     in_triple_quote = False
 
     while scan_pos < len(synthesis_content):
-        if synthesis_content[scan_pos:scan_pos + 3] == '"""':
+        if synthesis_content[scan_pos : scan_pos + 3] == '"""':
             in_triple_quote = not in_triple_quote
             scan_pos += 3
             continue
 
-        if not in_triple_quote and synthesis_content[scan_pos:scan_pos + 4] == '\n```':
+        if (
+            not in_triple_quote
+            and synthesis_content[scan_pos : scan_pos + 4] == "\n```"
+        ):
             after_fence = scan_pos + 4
-            if after_fence >= len(synthesis_content) or not synthesis_content[after_fence].isalpha():
+            if (
+                after_fence >= len(synthesis_content)
+                or not synthesis_content[after_fence].isalpha()
+            ):
                 # Found the end
                 toml_end = scan_pos
                 # Reconstruct with new TOML
                 before = synthesis_content[:toml_start]
-                after = synthesis_content[toml_end + 4:]  # Skip \n```
+                after = synthesis_content[toml_end + 4 :]  # Skip \n```
                 return f"{before}```toml\n{new_toml}\n```{after}"
 
         scan_pos += 1
@@ -623,7 +662,9 @@ def _summarize_validation(validation_content: str) -> tuple[Optional[dict], bool
     data = _parse_validation_toml(validation_content)
 
     if data is None:
-        click.echo("  (Validation TOML parse error - see validation-report.md for details)")
+        click.echo(
+            "  (Validation TOML parse error - see validation-report.md for details)"
+        )
         return None, False
 
     # Display summary
@@ -661,7 +702,8 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
 
     # Count analysis files (excluding synthesis and validation outputs)
     analysis_files = [
-        f for f in analysis_dir.glob("*.md")
+        f
+        for f in analysis_dir.glob("*.md")
         if f.name.lower() not in ("global-synthesis.md", "validation-report.md")
     ]
 
@@ -702,8 +744,12 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
                     for iteration in range(max_iterations):
                         # Run validation phase (quality gate)
                         click.echo()
-                        click.echo(f"Running quality validation (iteration {iteration + 1})...")
-                        validation_result = await analyzer.validate_against_best_practices(result)
+                        click.echo(
+                            f"Running quality validation (iteration {iteration + 1})..."
+                        )
+                        validation_result = (
+                            await analyzer.validate_against_best_practices(result)
+                        )
 
                         # Write validation report
                         validation_path = analysis_dir / "validation-report.md"
@@ -711,11 +757,15 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
                         click.echo(f"Written: {validation_path}")
 
                         # Parse and summarize validation results
-                        validation_data, has_issues = _summarize_validation(validation_result)
+                        validation_data, has_issues = _summarize_validation(
+                            validation_result
+                        )
 
                         if validation_data is None:
                             click.echo()
-                            click.echo("Could not parse validation - skipping fix loop.")
+                            click.echo(
+                                "Could not parse validation - skipping fix loop."
+                            )
                             break
 
                         if not has_issues:
@@ -725,7 +775,9 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
 
                         if iteration == max_iterations - 1:
                             click.echo()
-                            click.echo("Max iterations reached. Some issues remain unfixed.")
+                            click.echo(
+                                "Max iterations reached. Some issues remain unfixed."
+                            )
                             break
 
                         # Extract issues and run fix
@@ -738,13 +790,17 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
                             break
 
                         issues_text = _format_validation_issues(validation_data)
-                        fixed_toml = await analyzer.fix_recommendations(original_toml, issues_text)
+                        fixed_toml = await analyzer.fix_recommendations(
+                            original_toml, issues_text
+                        )
 
                         # Extract just the TOML from the fix response
                         fixed_toml_start = fixed_toml.find("```toml\n")
                         fixed_toml_end = fixed_toml.rfind("\n```")
                         if fixed_toml_start != -1 and fixed_toml_end > fixed_toml_start:
-                            fixed_toml_content = fixed_toml[fixed_toml_start + 8:fixed_toml_end]
+                            fixed_toml_content = fixed_toml[
+                                fixed_toml_start + 8 : fixed_toml_end
+                            ]
                         else:
                             fixed_toml_content = fixed_toml
 

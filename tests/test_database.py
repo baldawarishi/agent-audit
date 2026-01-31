@@ -199,8 +199,18 @@ class TestDatabase:
     def test_get_child_sessions(self, db):
         """Test getting all child sessions for a parent."""
         parent = Session(id="parent", project="p", started_at="2026-01-01T10:00:00Z")
-        child1 = Session(id="child1", project="p", parent_session_id="parent", started_at="2026-01-01T10:01:00Z")
-        child2 = Session(id="child2", project="p", parent_session_id="parent", started_at="2026-01-01T10:02:00Z")
+        child1 = Session(
+            id="child1",
+            project="p",
+            parent_session_id="parent",
+            started_at="2026-01-01T10:01:00Z",
+        )
+        child2 = Session(
+            id="child2",
+            project="p",
+            parent_session_id="parent",
+            started_at="2026-01-01T10:02:00Z",
+        )
         other = Session(id="other", project="p", started_at="2026-01-01T10:03:00Z")
 
         db.insert_session(parent)
@@ -216,7 +226,12 @@ class TestDatabase:
         """Test getting sessions with no parent."""
         root1 = Session(id="root1", project="p", started_at="2026-01-01T10:00:00Z")
         root2 = Session(id="root2", project="p", started_at="2026-01-01T10:01:00Z")
-        child = Session(id="child", project="p", parent_session_id="root1", started_at="2026-01-01T10:02:00Z")
+        child = Session(
+            id="child",
+            project="p",
+            parent_session_id="root1",
+            started_at="2026-01-01T10:02:00Z",
+        )
 
         db.insert_session(root1)
         db.insert_session(root2)
@@ -229,8 +244,18 @@ class TestDatabase:
     def test_get_session_tree(self, db):
         """Test reconstructing a session tree with nested children."""
         root = Session(id="root", project="p", started_at="2026-01-01T10:00:00Z")
-        child1 = Session(id="child1", project="p", parent_session_id="root", started_at="2026-01-01T10:01:00Z")
-        grandchild = Session(id="grandchild", project="p", parent_session_id="child1", started_at="2026-01-01T10:02:00Z")
+        child1 = Session(
+            id="child1",
+            project="p",
+            parent_session_id="root",
+            started_at="2026-01-01T10:01:00Z",
+        )
+        grandchild = Session(
+            id="grandchild",
+            project="p",
+            parent_session_id="child1",
+            started_at="2026-01-01T10:02:00Z",
+        )
 
         db.insert_session(root)
         db.insert_session(child1)
@@ -254,14 +279,52 @@ class TestDatabase:
             total_input_tokens=100,
             total_output_tokens=200,
             messages=[
-                Message(id="m1", session_id="s1", type="user", timestamp="2026-01-01T10:00:00Z", content="Hello"),
-                Message(id="m2", session_id="s1", type="assistant", timestamp="2026-01-01T10:00:01Z", content="Hi"),
-                Message(id="m3", session_id="s1", type="user", timestamp="2026-01-01T10:00:02Z", content="Help"),
-                Message(id="m4", session_id="s1", type="assistant", timestamp="2026-01-01T10:00:03Z", content="Sure"),
+                Message(
+                    id="m1",
+                    session_id="s1",
+                    type="user",
+                    timestamp="2026-01-01T10:00:00Z",
+                    content="Hello",
+                ),
+                Message(
+                    id="m2",
+                    session_id="s1",
+                    type="assistant",
+                    timestamp="2026-01-01T10:00:01Z",
+                    content="Hi",
+                ),
+                Message(
+                    id="m3",
+                    session_id="s1",
+                    type="user",
+                    timestamp="2026-01-01T10:00:02Z",
+                    content="Help",
+                ),
+                Message(
+                    id="m4",
+                    session_id="s1",
+                    type="assistant",
+                    timestamp="2026-01-01T10:00:03Z",
+                    content="Sure",
+                ),
             ],
             tool_calls=[
-                ToolCall(id="tc1", message_id="m2", session_id="s1", tool_name="Read", input_json="{}", timestamp="2026-01-01T10:00:01Z"),
-                ToolCall(id="tc2", message_id="m4", session_id="s1", tool_name="Edit", input_json="{}", timestamp="2026-01-01T10:00:03Z"),
+                ToolCall(
+                    id="tc1",
+                    message_id="m2",
+                    session_id="s1",
+                    tool_name="Read",
+                    input_json="{}",
+                    timestamp="2026-01-01T10:00:01Z",
+                ),
+                ToolCall(
+                    id="tc2",
+                    message_id="m4",
+                    session_id="s1",
+                    tool_name="Edit",
+                    input_json="{}",
+                    timestamp="2026-01-01T10:00:03Z",
+                ),
             ],
         )
         session2 = Session(
@@ -272,11 +335,30 @@ class TestDatabase:
             total_input_tokens=150,
             total_output_tokens=250,
             messages=[
-                Message(id="m5", session_id="s2", type="user", timestamp="2026-01-02T10:00:00Z", content="Test"),
-                Message(id="m6", session_id="s2", type="assistant", timestamp="2026-01-02T10:00:01Z", content="Ok"),
+                Message(
+                    id="m5",
+                    session_id="s2",
+                    type="user",
+                    timestamp="2026-01-02T10:00:00Z",
+                    content="Test",
+                ),
+                Message(
+                    id="m6",
+                    session_id="s2",
+                    type="assistant",
+                    timestamp="2026-01-02T10:00:01Z",
+                    content="Ok",
+                ),
             ],
             tool_calls=[
-                ToolCall(id="tc3", message_id="m6", session_id="s2", tool_name="Bash", input_json="{}", timestamp="2026-01-02T10:00:01Z"),
+                ToolCall(
+                    id="tc3",
+                    message_id="m6",
+                    session_id="s2",
+                    tool_name="Bash",
+                    input_json="{}",
+                    timestamp="2026-01-02T10:00:01Z",
+                ),
             ],
         )
         # Another project - should not be counted
@@ -295,7 +377,9 @@ class TestDatabase:
         metrics = db.get_project_metrics("my-project")
 
         assert metrics["session_count"] == 2
-        assert metrics["turn_count"] == 3  # 2 turns in s1 + 1 turn in s2 (user+assistant pairs)
+        assert (
+            metrics["turn_count"] == 3
+        )  # 2 turns in s1 + 1 turn in s2 (user+assistant pairs)
         assert metrics["total_input_tokens"] == 250  # 100 + 150
         assert metrics["total_output_tokens"] == 450  # 200 + 250
         assert metrics["tool_call_count"] == 3  # 2 + 1
@@ -315,44 +399,129 @@ class TestDatabase:
         sessions = [
             # Small session: 2 messages
             Session(
-                id="s1", project="p1", started_at="2026-01-01T10:00:00Z",
+                id="s1",
+                project="p1",
+                started_at="2026-01-01T10:00:00Z",
                 total_output_tokens=100,
                 messages=[
-                    Message(id="m1", session_id="s1", type="user", timestamp="2026-01-01T10:00:00Z", content="Hi"),
-                    Message(id="m2", session_id="s1", type="assistant", timestamp="2026-01-01T10:00:01Z", content="Hello"),
+                    Message(
+                        id="m1",
+                        session_id="s1",
+                        type="user",
+                        timestamp="2026-01-01T10:00:00Z",
+                        content="Hi",
+                    ),
+                    Message(
+                        id="m2",
+                        session_id="s1",
+                        type="assistant",
+                        timestamp="2026-01-01T10:00:01Z",
+                        content="Hello",
+                    ),
                 ],
             ),
             # Medium session: 4 messages
             Session(
-                id="s2", project="p1", started_at="2026-01-01T11:00:00Z",
+                id="s2",
+                project="p1",
+                started_at="2026-01-01T11:00:00Z",
                 total_output_tokens=500,
                 messages=[
-                    Message(id="m3", session_id="s2", type="user", timestamp="2026-01-01T11:00:00Z", content="Help"),
-                    Message(id="m4", session_id="s2", type="assistant", timestamp="2026-01-01T11:00:01Z", content="Sure"),
-                    Message(id="m5", session_id="s2", type="user", timestamp="2026-01-01T11:00:02Z", content="More"),
-                    Message(id="m6", session_id="s2", type="assistant", timestamp="2026-01-01T11:00:03Z", content="Ok"),
+                    Message(
+                        id="m3",
+                        session_id="s2",
+                        type="user",
+                        timestamp="2026-01-01T11:00:00Z",
+                        content="Help",
+                    ),
+                    Message(
+                        id="m4",
+                        session_id="s2",
+                        type="assistant",
+                        timestamp="2026-01-01T11:00:01Z",
+                        content="Sure",
+                    ),
+                    Message(
+                        id="m5",
+                        session_id="s2",
+                        type="user",
+                        timestamp="2026-01-01T11:00:02Z",
+                        content="More",
+                    ),
+                    Message(
+                        id="m6",
+                        session_id="s2",
+                        type="assistant",
+                        timestamp="2026-01-01T11:00:03Z",
+                        content="Ok",
+                    ),
                 ],
             ),
             # Large session: 6 messages
             Session(
-                id="s3", project="p2", started_at="2026-01-01T12:00:00Z",
+                id="s3",
+                project="p2",
+                started_at="2026-01-01T12:00:00Z",
                 total_output_tokens=1000,
                 messages=[
-                    Message(id="m7", session_id="s3", type="user", timestamp="2026-01-01T12:00:00Z", content="A"),
-                    Message(id="m8", session_id="s3", type="assistant", timestamp="2026-01-01T12:00:01Z", content="B"),
-                    Message(id="m9", session_id="s3", type="user", timestamp="2026-01-01T12:00:02Z", content="C"),
-                    Message(id="m10", session_id="s3", type="assistant", timestamp="2026-01-01T12:00:03Z", content="D"),
-                    Message(id="m11", session_id="s3", type="user", timestamp="2026-01-01T12:00:04Z", content="E"),
-                    Message(id="m12", session_id="s3", type="assistant", timestamp="2026-01-01T12:00:05Z", content="F"),
+                    Message(
+                        id="m7",
+                        session_id="s3",
+                        type="user",
+                        timestamp="2026-01-01T12:00:00Z",
+                        content="A",
+                    ),
+                    Message(
+                        id="m8",
+                        session_id="s3",
+                        type="assistant",
+                        timestamp="2026-01-01T12:00:01Z",
+                        content="B",
+                    ),
+                    Message(
+                        id="m9",
+                        session_id="s3",
+                        type="user",
+                        timestamp="2026-01-01T12:00:02Z",
+                        content="C",
+                    ),
+                    Message(
+                        id="m10",
+                        session_id="s3",
+                        type="assistant",
+                        timestamp="2026-01-01T12:00:03Z",
+                        content="D",
+                    ),
+                    Message(
+                        id="m11",
+                        session_id="s3",
+                        type="user",
+                        timestamp="2026-01-01T12:00:04Z",
+                        content="E",
+                    ),
+                    Message(
+                        id="m12",
+                        session_id="s3",
+                        type="assistant",
+                        timestamp="2026-01-01T12:00:05Z",
+                        content="F",
+                    ),
                 ],
             ),
             # Very large session: 10 messages
             Session(
-                id="s4", project="p2", started_at="2026-01-01T13:00:00Z",
+                id="s4",
+                project="p2",
+                started_at="2026-01-01T13:00:00Z",
                 total_output_tokens=2000,
                 messages=[
-                    Message(id=f"m{i}", session_id="s4", type="user" if i % 2 == 0 else "assistant",
-                            timestamp=f"2026-01-01T13:00:{i:02d}Z", content=f"Msg{i}")
+                    Message(
+                        id=f"m{i}",
+                        session_id="s4",
+                        type="user" if i % 2 == 0 else "assistant",
+                        timestamp=f"2026-01-01T13:00:{i:02d}Z",
+                        content=f"Msg{i}",
+                    )
                     for i in range(13, 23)
                 ],
             ),
@@ -395,42 +564,127 @@ class TestDatabase:
         # Create sessions for one project
         sessions = [
             Session(
-                id="s1", project="my-project", started_at="2026-01-01T10:00:00Z",
+                id="s1",
+                project="my-project",
+                started_at="2026-01-01T10:00:00Z",
                 total_output_tokens=100,
                 messages=[
-                    Message(id="m1", session_id="s1", type="user", timestamp="2026-01-01T10:00:00Z", content="Hi"),
-                    Message(id="m2", session_id="s1", type="assistant", timestamp="2026-01-01T10:00:01Z", content="Hello"),
+                    Message(
+                        id="m1",
+                        session_id="s1",
+                        type="user",
+                        timestamp="2026-01-01T10:00:00Z",
+                        content="Hi",
+                    ),
+                    Message(
+                        id="m2",
+                        session_id="s1",
+                        type="assistant",
+                        timestamp="2026-01-01T10:00:01Z",
+                        content="Hello",
+                    ),
                 ],
             ),
             Session(
-                id="s2", project="my-project", started_at="2026-01-01T11:00:00Z",
+                id="s2",
+                project="my-project",
+                started_at="2026-01-01T11:00:00Z",
                 total_output_tokens=500,
                 messages=[
-                    Message(id="m3", session_id="s2", type="user", timestamp="2026-01-01T11:00:00Z", content="Help"),
-                    Message(id="m4", session_id="s2", type="assistant", timestamp="2026-01-01T11:00:01Z", content="Sure"),
-                    Message(id="m5", session_id="s2", type="user", timestamp="2026-01-01T11:00:02Z", content="More"),
-                    Message(id="m6", session_id="s2", type="assistant", timestamp="2026-01-01T11:00:03Z", content="Ok"),
+                    Message(
+                        id="m3",
+                        session_id="s2",
+                        type="user",
+                        timestamp="2026-01-01T11:00:00Z",
+                        content="Help",
+                    ),
+                    Message(
+                        id="m4",
+                        session_id="s2",
+                        type="assistant",
+                        timestamp="2026-01-01T11:00:01Z",
+                        content="Sure",
+                    ),
+                    Message(
+                        id="m5",
+                        session_id="s2",
+                        type="user",
+                        timestamp="2026-01-01T11:00:02Z",
+                        content="More",
+                    ),
+                    Message(
+                        id="m6",
+                        session_id="s2",
+                        type="assistant",
+                        timestamp="2026-01-01T11:00:03Z",
+                        content="Ok",
+                    ),
                 ],
             ),
             Session(
-                id="s3", project="my-project", started_at="2026-01-01T12:00:00Z",
+                id="s3",
+                project="my-project",
+                started_at="2026-01-01T12:00:00Z",
                 total_output_tokens=1000,
                 messages=[
-                    Message(id="m7", session_id="s3", type="user", timestamp="2026-01-01T12:00:00Z", content="A"),
-                    Message(id="m8", session_id="s3", type="assistant", timestamp="2026-01-01T12:00:01Z", content="B"),
-                    Message(id="m9", session_id="s3", type="user", timestamp="2026-01-01T12:00:02Z", content="C"),
-                    Message(id="m10", session_id="s3", type="assistant", timestamp="2026-01-01T12:00:03Z", content="D"),
-                    Message(id="m11", session_id="s3", type="user", timestamp="2026-01-01T12:00:04Z", content="E"),
-                    Message(id="m12", session_id="s3", type="assistant", timestamp="2026-01-01T12:00:05Z", content="F"),
+                    Message(
+                        id="m7",
+                        session_id="s3",
+                        type="user",
+                        timestamp="2026-01-01T12:00:00Z",
+                        content="A",
+                    ),
+                    Message(
+                        id="m8",
+                        session_id="s3",
+                        type="assistant",
+                        timestamp="2026-01-01T12:00:01Z",
+                        content="B",
+                    ),
+                    Message(
+                        id="m9",
+                        session_id="s3",
+                        type="user",
+                        timestamp="2026-01-01T12:00:02Z",
+                        content="C",
+                    ),
+                    Message(
+                        id="m10",
+                        session_id="s3",
+                        type="assistant",
+                        timestamp="2026-01-01T12:00:03Z",
+                        content="D",
+                    ),
+                    Message(
+                        id="m11",
+                        session_id="s3",
+                        type="user",
+                        timestamp="2026-01-01T12:00:04Z",
+                        content="E",
+                    ),
+                    Message(
+                        id="m12",
+                        session_id="s3",
+                        type="assistant",
+                        timestamp="2026-01-01T12:00:05Z",
+                        content="F",
+                    ),
                 ],
             ),
             # Different project - should not be included
             Session(
-                id="s4", project="other-project", started_at="2026-01-01T13:00:00Z",
+                id="s4",
+                project="other-project",
+                started_at="2026-01-01T13:00:00Z",
                 total_output_tokens=9999,
                 messages=[
-                    Message(id=f"m{i}", session_id="s4", type="user" if i % 2 == 0 else "assistant",
-                            timestamp=f"2026-01-01T13:00:{i:02d}Z", content=f"Msg{i}")
+                    Message(
+                        id=f"m{i}",
+                        session_id="s4",
+                        type="user" if i % 2 == 0 else "assistant",
+                        timestamp=f"2026-01-01T13:00:{i:02d}Z",
+                        content=f"Msg{i}",
+                    )
                     for i in range(13, 33)  # 20 messages
                 ],
             ),
@@ -595,8 +849,20 @@ class TestDatabase:
             id="stats-session",
             project="test",
             commits=[
-                Commit(id="c1", session_id="stats-session", commit_hash="abc", message="msg", timestamp=""),
-                Commit(id="c2", session_id="stats-session", commit_hash="def", message="msg", timestamp=""),
+                Commit(
+                    id="c1",
+                    session_id="stats-session",
+                    commit_hash="abc",
+                    message="msg",
+                    timestamp="",
+                ),
+                Commit(
+                    id="c2",
+                    session_id="stats-session",
+                    commit_hash="def",
+                    message="msg",
+                    timestamp="",
+                ),
             ],
         )
         db.insert_session(session)

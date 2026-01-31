@@ -53,7 +53,9 @@ class TestCli:
 
     def test_analyze_no_db(self, runner, temp_archive_dir):
         """Analyze command should error without database."""
-        result = runner.invoke(main, ["analyze", "--archive-dir", str(temp_archive_dir)])
+        result = runner.invoke(
+            main, ["analyze", "--archive-dir", str(temp_archive_dir)]
+        )
         assert result.exit_code == 0
         assert "No archive database found" in result.output
 
