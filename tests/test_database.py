@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_audit.database import Database
-from claude_code_audit.models import Message, Session, ToolCall, ToolResult
+from claude_code_audit.models import Commit, Message, Session, ToolCall, ToolResult
 
 
 @pytest.fixture
@@ -459,3 +459,161 @@ class TestDatabase:
         assert stats["avg_tokens"] == 0
         assert stats["min_tokens"] == 0
         assert stats["max_tokens"] == 0
+
+    def test_stores_github_repo(self, db):
+        """Test storing and retrieving github_repo field."""
+        session = Session(
+            id="github-session",
+            project="test",
+            github_repo="owner/repo-name",
+        )
+        db.insert_session(session)
+
+        sessions = db.get_all_sessions()
+        assert len(sessions) == 1
+        assert sessions[0]["github_repo"] == "owner/repo-name"
+
+    def test_stores_title(self, db):
+        """Test storing and retrieving title field."""
+        session = Session(
+            id="titled-session",
+            project="test",
+            title="My Session Title",
+        )
+        db.insert_session(session)
+
+        sessions = db.get_all_sessions()
+        assert len(sessions) == 1
+        assert sessions[0]["title"] == "My Session Title"
+
+    def test_stores_session_context(self, db):
+        """Test storing and retrieving session_context field."""
+        session = Session(
+            id="context-session",
+            project="test",
+            session_context='{"outcomes": [], "sources": []}',
+        )
+        db.insert_session(session)
+
+        sessions = db.get_all_sessions()
+        assert len(sessions) == 1
+        assert sessions[0]["session_context"] == '{"outcomes": [], "sources": []}'
+
+    def test_stores_is_compact_summary(self, db):
+        """Test storing and retrieving is_compact_summary field."""
+        session = Session(
+            id="compact-session",
+            project="test",
+            messages=[
+                Message(
+                    id="msg-1",
+                    session_id="compact-session",
+                    type="user",
+                    timestamp="2026-01-01T10:00:00Z",
+                    content="Continuation...",
+                    is_compact_summary=True,
+                ),
+            ],
+        )
+        db.insert_session(session)
+
+        messages = db.get_messages_for_session("compact-session")
+        assert len(messages) == 1
+        assert messages[0]["is_compact_summary"] == 1  # SQLite stores as 1
+
+    def test_stores_has_images(self, db):
+        """Test storing and retrieving has_images field."""
+        session = Session(
+            id="images-session",
+            project="test",
+            messages=[
+                Message(
+                    id="msg-1",
+                    session_id="images-session",
+                    type="user",
+                    timestamp="2026-01-01T10:00:00Z",
+                    content="Image message",
+                    has_images=True,
+                ),
+            ],
+        )
+        db.insert_session(session)
+
+        messages = db.get_messages_for_session("images-session")
+        assert len(messages) == 1
+        assert messages[0]["has_images"] == 1  # SQLite stores as 1
+
+    def test_stores_and_retrieves_commits(self, db):
+        """Test storing and retrieving commits."""
+        session = Session(
+            id="commit-session",
+            project="test",
+            commits=[
+                Commit(
+                    id="commit-1",
+                    session_id="commit-session",
+                    commit_hash="abc1234",
+                    message="Fix the bug",
+                    timestamp="2026-01-01T10:00:00Z",
+                ),
+                Commit(
+                    id="commit-2",
+                    session_id="commit-session",
+                    commit_hash="def5678",
+                    message="Add feature",
+                    timestamp="2026-01-01T10:05:00Z",
+                ),
+            ],
+        )
+        db.insert_session(session)
+
+        commits = db.get_commits_for_session("commit-session")
+        assert len(commits) == 2
+        assert commits[0]["commit_hash"] == "abc1234"
+        assert commits[0]["message"] == "Fix the bug"
+        assert commits[1]["commit_hash"] == "def5678"
+        assert commits[1]["message"] == "Add feature"
+
+    def test_get_sessions_by_github_repo(self, db):
+        """Test getting sessions by github_repo."""
+        session1 = Session(id="s1", project="p1", github_repo="owner/repo")
+        session2 = Session(id="s2", project="p2", github_repo="owner/repo")
+        session3 = Session(id="s3", project="p3", github_repo="other/repo")
+
+        db.insert_session(session1)
+        db.insert_session(session2)
+        db.insert_session(session3)
+
+        sessions = db.get_sessions_by_github_repo("owner/repo")
+        assert len(sessions) == 2
+        ids = {s["id"] for s in sessions}
+        assert ids == {"s1", "s2"}
+
+    def test_stats_includes_commits(self, db):
+        """Test that stats include commit count."""
+        session = Session(
+            id="stats-session",
+            project="test",
+            commits=[
+                Commit(id="c1", session_id="stats-session", commit_hash="abc", message="msg", timestamp=""),
+                Commit(id="c2", session_id="stats-session", commit_hash="def", message="msg", timestamp=""),
+            ],
+        )
+        db.insert_session(session)
+
+        stats = db.get_stats()
+        assert stats["total_commits"] == 2
+
+    def test_stats_includes_github_repos(self, db):
+        """Test that stats include github_repos list."""
+        session1 = Session(id="s1", project="p1", github_repo="owner/repo1")
+        session2 = Session(id="s2", project="p2", github_repo="owner/repo2")
+        session3 = Session(id="s3", project="p3")  # No repo
+
+        db.insert_session(session1)
+        db.insert_session(session2)
+        db.insert_session(session3)
+
+        stats = db.get_stats()
+        assert "github_repos" in stats
+        assert set(stats["github_repos"]) == {"owner/repo1", "owner/repo2"}

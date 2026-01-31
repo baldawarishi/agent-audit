@@ -1,11 +1,20 @@
 """Parse Claude Code JSONL session files."""
 
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Iterator
 
-from .models import Message, Session, ToolCall, ToolResult
+from .models import (
+    Commit,
+    COMMIT_PATTERN,
+    GITHUB_REPO_PATTERN,
+    Message,
+    Session,
+    ToolCall,
+    ToolResult,
+)
 
 
 def parse_jsonl_file(file_path: Path) -> Iterator[dict]:
@@ -91,6 +100,95 @@ def extract_tool_results(content, session_id: str, timestamp: str) -> list[ToolR
     return tool_results
 
 
+def extract_commits(content, session_id: str, timestamp: str) -> list[Commit]:
+    """Extract git commits from tool result content.
+
+    Looks for patterns like: [branch abc1234] commit message
+    """
+    commits = []
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, str):
+                    for match in COMMIT_PATTERN.finditer(result_content):
+                        commits.append(
+                            Commit(
+                                id=str(uuid.uuid4()),
+                                session_id=session_id,
+                                commit_hash=match.group(1),
+                                message=match.group(2),
+                                timestamp=timestamp,
+                            )
+                        )
+    return commits
+
+
+def detect_github_repo_from_content(content) -> str | None:
+    """Detect GitHub repo from git push output in tool results.
+
+    Looks for patterns like: github.com/owner/repo/pull/new/branch
+    """
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, str):
+                    match = GITHUB_REPO_PATTERN.search(result_content)
+                    if match:
+                        return match.group(1)
+    return None
+
+
+def extract_repo_from_session_context(session_context: dict) -> str | None:
+    """Extract GitHub repo from session_context metadata.
+
+    Looks in session_context.outcomes for git_info.repo,
+    or parses from session_context.sources URL.
+    """
+    if not session_context:
+        return None
+
+    # Try outcomes first (has clean repo format)
+    outcomes = session_context.get("outcomes", [])
+    for outcome in outcomes:
+        if outcome.get("type") == "git_repository":
+            git_info = outcome.get("git_info", {})
+            repo = git_info.get("repo")
+            if repo:
+                return repo
+
+    # Fall back to sources URL
+    sources = session_context.get("sources", [])
+    for source in sources:
+        if source.get("type") == "git_repository":
+            url = source.get("url", "")
+            # Parse github.com/owner/repo from URL
+            if "github.com/" in url:
+                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?$", url)
+                if match:
+                    return match.group(1)
+
+    return None
+
+
+def has_image_content(content) -> bool:
+    """Check if message content contains any image blocks."""
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "image":
+                    return True
+                # Also check tool_result content for images
+                if block.get("type") == "tool_result":
+                    result_content = block.get("content", "")
+                    if isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "image":
+                                return True
+    return False
+
+
 def is_warmup_session(session: Session) -> bool:
     """Detect if a session is a warmup/cache-priming session.
 
@@ -138,6 +236,8 @@ def parse_session(file_path: Path, project_name: str) -> Session:
     messages = []
     all_tool_calls = []
     all_tool_results = []
+    all_commits = []
+    detected_github_repo = None
 
     total_input = 0
     total_output = 0
@@ -170,6 +270,22 @@ def parse_session(file_path: Path, project_name: str) -> Session:
         if entry_type == "summary" and entry.get("summary"):
             session.summary = entry.get("summary")
             continue  # Summary entries don't have message data
+
+        # Extract session_context if present (typically on first entry)
+        if not session.session_context and entry.get("session_context"):
+            session_context = entry.get("session_context")
+            session.session_context = json.dumps(session_context)
+            # Try to extract GitHub repo from session_context
+            repo = extract_repo_from_session_context(session_context)
+            if repo:
+                session.github_repo = repo
+
+        # Extract title if present
+        if not session.title and entry.get("title"):
+            session.title = entry.get("title")
+
+        # Track isCompactSummary for this entry
+        is_compact_summary = entry.get("isCompactSummary", False)
 
         timestamp = entry.get("timestamp", "")
         message_data = entry.get("message", {})
@@ -226,6 +342,12 @@ def parse_session(file_path: Path, project_name: str) -> Session:
                 msg_type = "tool_result"
                 results = extract_tool_results(content, session_id, timestamp)
                 all_tool_results.extend(results)
+                # Extract commits from tool results
+                commits = extract_commits(content, session_id, timestamp)
+                all_commits.extend(commits)
+                # Try to detect GitHub repo from git push output
+                if not detected_github_repo:
+                    detected_github_repo = detect_github_repo_from_content(content)
             else:
                 msg_type = "user"
         elif entry_type == "assistant":
@@ -234,6 +356,9 @@ def parse_session(file_path: Path, project_name: str) -> Session:
             all_tool_calls.extend(tool_calls)
         else:
             msg_type = entry_type or "unknown"
+
+        # Check for image content
+        msg_has_images = has_image_content(content)
 
         message = Message(
             id=msg_uuid,
@@ -248,6 +373,8 @@ def parse_session(file_path: Path, project_name: str) -> Session:
             thinking=extract_thinking_content(content) if msg_type == "assistant" else None,
             stop_reason=message_data.get("stop_reason"),
             is_sidechain=entry.get("isSidechain", False),
+            is_compact_summary=is_compact_summary,
+            has_images=msg_has_images,
             tool_calls=extract_tool_calls(content, msg_uuid, session_id, timestamp) if msg_type == "assistant" else [],
         )
         messages.append(message)
@@ -255,9 +382,14 @@ def parse_session(file_path: Path, project_name: str) -> Session:
     session.messages = messages
     session.tool_calls = all_tool_calls
     session.tool_results = all_tool_results
+    session.commits = all_commits
     session.total_input_tokens = total_input
     session.total_output_tokens = total_output
     session.total_cache_read_tokens = total_cache
+
+    # Set GitHub repo from content detection if not already set from session_context
+    if not session.github_repo and detected_github_repo:
+        session.github_repo = detected_github_repo
 
     # Detect warmup and sidechain sessions
     session.is_warmup = is_warmup_session(session)

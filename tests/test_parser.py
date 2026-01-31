@@ -10,6 +10,10 @@ from claude_code_audit.parser import (
     extract_thinking_content,
     extract_tool_calls,
     extract_tool_results,
+    extract_commits,
+    detect_github_repo_from_content,
+    extract_repo_from_session_context,
+    has_image_content,
     parse_jsonl_file,
     parse_session,
     get_project_name_from_dir,
@@ -497,3 +501,275 @@ class TestIsTmpDirectory:
     def test_case_insensitive(self):
         assert is_tmp_directory("-TMP-test") is True
         assert is_tmp_directory("-Private-Var-Folders-abc") is True
+
+
+class TestExtractCommits:
+    def test_extracts_commit_from_tool_result(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "[main abc1234] Fix the bug\n1 file changed",
+            }
+        ]
+        commits = extract_commits(content, "session-1", "2026-01-01T10:00:00Z")
+        assert len(commits) == 1
+        assert commits[0].commit_hash == "abc1234"
+        assert commits[0].message == "Fix the bug"
+        assert commits[0].session_id == "session-1"
+
+    def test_extracts_multiple_commits(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "[main abc1234] First commit\n[main def5678] Second commit\n",
+            }
+        ]
+        commits = extract_commits(content, "session-1", "2026-01-01T10:00:00Z")
+        assert len(commits) == 2
+        assert commits[0].commit_hash == "abc1234"
+        assert commits[1].commit_hash == "def5678"
+
+    def test_handles_branch_with_slash(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "[feature/my-branch 1234567] Added feature\n",
+            }
+        ]
+        commits = extract_commits(content, "session-1", "2026-01-01T10:00:00Z")
+        assert len(commits) == 1
+        assert commits[0].commit_hash == "1234567"
+        assert commits[0].message == "Added feature"
+
+    def test_no_commits_returns_empty(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "No commits here",
+            }
+        ]
+        commits = extract_commits(content, "session-1", "2026-01-01T10:00:00Z")
+        assert len(commits) == 0
+
+
+class TestDetectGitHubRepoFromContent:
+    def test_detects_repo_from_git_push(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "remote: Create a pull request for 'feature' on GitHub by visiting:\nremote:      https://github.com/owner/repo/pull/new/feature\n",
+            }
+        ]
+        repo = detect_github_repo_from_content(content)
+        assert repo == "owner/repo"
+
+    def test_returns_none_when_no_match(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "Just some regular output",
+            }
+        ]
+        repo = detect_github_repo_from_content(content)
+        assert repo is None
+
+    def test_handles_non_list_content(self):
+        repo = detect_github_repo_from_content("string content")
+        assert repo is None
+
+
+class TestExtractRepoFromSessionContext:
+    def test_extracts_from_git_info(self):
+        session_context = {
+            "outcomes": [
+                {
+                    "type": "git_repository",
+                    "git_info": {"repo": "owner/repo-name"}
+                }
+            ]
+        }
+        repo = extract_repo_from_session_context(session_context)
+        assert repo == "owner/repo-name"
+
+    def test_extracts_from_sources_url(self):
+        session_context = {
+            "sources": [
+                {
+                    "type": "git_repository",
+                    "url": "https://github.com/owner/my-project.git"
+                }
+            ]
+        }
+        repo = extract_repo_from_session_context(session_context)
+        assert repo == "owner/my-project"
+
+    def test_prefers_outcomes_over_sources(self):
+        session_context = {
+            "outcomes": [
+                {
+                    "type": "git_repository",
+                    "git_info": {"repo": "outcomes/repo"}
+                }
+            ],
+            "sources": [
+                {
+                    "type": "git_repository",
+                    "url": "https://github.com/sources/repo.git"
+                }
+            ]
+        }
+        repo = extract_repo_from_session_context(session_context)
+        assert repo == "outcomes/repo"
+
+    def test_returns_none_for_empty_context(self):
+        assert extract_repo_from_session_context(None) is None
+        assert extract_repo_from_session_context({}) is None
+
+
+class TestHasImageContent:
+    def test_detects_image_block(self):
+        content = [
+            {"type": "image", "source": {"media_type": "image/png", "data": "base64..."}}
+        ]
+        assert has_image_content(content) is True
+
+    def test_detects_image_in_tool_result(self):
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": [
+                    {"type": "image", "source": {"media_type": "image/png", "data": "base64..."}}
+                ]
+            }
+        ]
+        assert has_image_content(content) is True
+
+    def test_returns_false_for_no_images(self):
+        content = [
+            {"type": "text", "text": "Hello world"}
+        ]
+        assert has_image_content(content) is False
+
+    def test_handles_non_list_content(self):
+        assert has_image_content("string content") is False
+
+
+class TestParseSessionNewFields:
+    def test_parses_is_compact_summary(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "isCompactSummary": True,
+                "message": {"role": "user", "content": "Continuation..."},
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert len(session.messages) == 1
+            assert session.messages[0].is_compact_summary is True
+
+    def test_parses_github_repo_from_context(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "session_context": {
+                    "outcomes": [
+                        {"type": "git_repository", "git_info": {"repo": "owner/my-repo"}}
+                    ]
+                },
+                "message": {"role": "user", "content": "Hello"},
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert session.github_repo == "owner/my-repo"
+
+    def test_parses_github_repo_from_git_push(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "content": "https://github.com/owner/repo/pull/new/feature"
+                        }
+                    ]
+                },
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert session.github_repo == "owner/repo"
+
+    def test_parses_commits_from_tool_results(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tool-1",
+                            "content": "[main abc1234] Fix bug\n"
+                        }
+                    ]
+                },
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert len(session.commits) == 1
+            assert session.commits[0].commit_hash == "abc1234"
+            assert session.commits[0].message == "Fix bug"
+
+    def test_parses_title(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "title": "My Session Title",
+                "message": {"role": "user", "content": "Hello"},
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert session.title == "My Session Title"
+
+    def test_parses_has_images(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(json.dumps({
+                "type": "user",
+                "uuid": "msg-1",
+                "timestamp": "2026-01-01T10:00:00Z",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"media_type": "image/png", "data": "abc123"}}
+                    ]
+                },
+            }) + "\n")
+            f.flush()
+
+            session = parse_session(Path(f.name), "test-project")
+            assert len(session.messages) == 1
+            assert session.messages[0].has_images is True

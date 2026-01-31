@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     git_branch TEXT,
     slug TEXT,
     summary TEXT,
+    title TEXT,
     parent_session_id TEXT,
     started_at TEXT,
     ended_at TEXT,
@@ -23,7 +24,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     total_cache_read_tokens INTEGER,
     model TEXT,
     is_warmup BOOLEAN DEFAULT FALSE,
-    is_sidechain BOOLEAN DEFAULT FALSE
+    is_sidechain BOOLEAN DEFAULT FALSE,
+    github_repo TEXT,
+    session_context TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -38,7 +41,9 @@ CREATE TABLE IF NOT EXISTS messages (
     stop_reason TEXT,
     input_tokens INTEGER,
     output_tokens INTEGER,
-    is_sidechain BOOLEAN DEFAULT FALSE
+    is_sidechain BOOLEAN DEFAULT FALSE,
+    is_compact_summary BOOLEAN DEFAULT FALSE,
+    has_images BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS tool_calls (
@@ -59,6 +64,14 @@ CREATE TABLE IF NOT EXISTS tool_results (
     timestamp TEXT
 );
 
+CREATE TABLE IF NOT EXISTS commits (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id),
+    commit_hash TEXT,
+    message TEXT,
+    timestamp TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
@@ -66,6 +79,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_results_session ON tool_results(session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_github_repo ON sessions(github_repo);
+CREATE INDEX IF NOT EXISTS idx_commits_session ON commits(session_id);
+CREATE INDEX IF NOT EXISTS idx_commits_hash ON commits(commit_hash);
 """
 
 # Migrations for existing databases (columns added in Phase 1)
@@ -80,6 +96,23 @@ MIGRATIONS = [
     # Phase 3: Warmup/sidechain session detection
     "ALTER TABLE sessions ADD COLUMN is_warmup BOOLEAN DEFAULT FALSE",
     "ALTER TABLE sessions ADD COLUMN is_sidechain BOOLEAN DEFAULT FALSE",
+    # Phase 4: Additional fields from claude-code-transcripts
+    "ALTER TABLE sessions ADD COLUMN title TEXT",
+    "ALTER TABLE sessions ADD COLUMN github_repo TEXT",
+    "ALTER TABLE sessions ADD COLUMN session_context TEXT",
+    "ALTER TABLE messages ADD COLUMN is_compact_summary BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE messages ADD COLUMN has_images BOOLEAN DEFAULT FALSE",
+    # Create commits table if it doesn't exist (handled by schema, but migration ensures index)
+    """CREATE TABLE IF NOT EXISTS commits (
+        id TEXT PRIMARY KEY,
+        session_id TEXT REFERENCES sessions(id),
+        commit_hash TEXT,
+        message TEXT,
+        timestamp TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_github_repo ON sessions(github_repo)",
+    "CREATE INDEX IF NOT EXISTS idx_commits_session ON commits(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_commits_hash ON commits(commit_hash)",
 ]
 
 
@@ -133,10 +166,10 @@ class Database:
         conn.execute(
             """
             INSERT OR REPLACE INTO sessions
-            (id, project, cwd, git_branch, slug, summary, parent_session_id, started_at, ended_at,
+            (id, project, cwd, git_branch, slug, summary, title, parent_session_id, started_at, ended_at,
              claude_version, total_input_tokens, total_output_tokens, total_cache_read_tokens, model,
-             is_warmup, is_sidechain)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             is_warmup, is_sidechain, github_repo, session_context)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -145,6 +178,7 @@ class Database:
                 session.git_branch,
                 session.slug,
                 session.summary,
+                session.title,
                 session.parent_session_id,
                 session.started_at,
                 session.ended_at,
@@ -155,6 +189,8 @@ class Database:
                 session.model,
                 session.is_warmup,
                 session.is_sidechain,
+                session.github_repo,
+                session.session_context,
             ),
         )
 
@@ -164,8 +200,8 @@ class Database:
                 """
                 INSERT OR REPLACE INTO messages
                 (id, session_id, parent_uuid, type, timestamp, content, thinking, model,
-                 stop_reason, input_tokens, output_tokens, is_sidechain)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stop_reason, input_tokens, output_tokens, is_sidechain, is_compact_summary, has_images)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message.id,
@@ -180,6 +216,8 @@ class Database:
                     message.input_tokens,
                     message.output_tokens,
                     message.is_sidechain,
+                    message.is_compact_summary,
+                    message.has_images,
                 ),
             )
 
@@ -216,6 +254,23 @@ class Database:
                     tool_result.content,
                     tool_result.is_error,
                     tool_result.timestamp,
+                ),
+            )
+
+        # Insert commits
+        for commit in session.commits:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO commits
+                (id, session_id, commit_hash, message, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    commit.id,
+                    commit.session_id,
+                    commit.commit_hash,
+                    commit.message,
+                    commit.timestamp,
                 ),
             )
 
@@ -282,6 +337,24 @@ class Database:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_commits_for_session(self, session_id: str) -> list[dict]:
+        """Get all commits for a session."""
+        conn = self.connect()
+        cursor = conn.execute(
+            "SELECT * FROM commits WHERE session_id = ? ORDER BY timestamp",
+            (session_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_sessions_by_github_repo(self, github_repo: str) -> list[dict]:
+        """Get all sessions associated with a GitHub repo."""
+        conn = self.connect()
+        cursor = conn.execute(
+            "SELECT * FROM sessions WHERE github_repo = ? ORDER BY started_at DESC",
+            (github_repo,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_stats(self) -> dict:
         """Get overall archive statistics."""
         conn = self.connect()
@@ -297,6 +370,9 @@ class Database:
         cursor = conn.execute("SELECT COUNT(*) as count FROM tool_calls")
         stats["total_tool_calls"] = cursor.fetchone()["count"]
 
+        cursor = conn.execute("SELECT COUNT(*) as count FROM commits")
+        stats["total_commits"] = cursor.fetchone()["count"]
+
         cursor = conn.execute(
             "SELECT SUM(total_input_tokens) as total FROM sessions"
         )
@@ -311,6 +387,9 @@ class Database:
 
         cursor = conn.execute("SELECT DISTINCT project FROM sessions")
         stats["projects"] = [row["project"] for row in cursor.fetchall()]
+
+        cursor = conn.execute("SELECT DISTINCT github_repo FROM sessions WHERE github_repo IS NOT NULL")
+        stats["github_repos"] = [row["github_repo"] for row in cursor.fetchall()]
 
         return stats
 
