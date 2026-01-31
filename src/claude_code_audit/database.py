@@ -6,7 +6,8 @@ from typing import Optional
 
 from .models import Session
 
-SCHEMA = """
+# Tables schema - run first (CREATE TABLE IF NOT EXISTS won't modify existing tables)
+SCHEMA_TABLES = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     project TEXT,
@@ -71,7 +72,10 @@ CREATE TABLE IF NOT EXISTS commits (
     message TEXT,
     timestamp TEXT
 );
+"""
 
+# Indexes - run after migrations so columns exist
+SCHEMA_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
@@ -129,13 +133,16 @@ class Database:
         if self.conn is None:
             self.conn = sqlite3.connect(self.db_path)
             self.conn.row_factory = sqlite3.Row
-            self.conn.executescript(SCHEMA)
-            # Run migrations for existing databases
+            # 1. Create tables first
+            self.conn.executescript(SCHEMA_TABLES)
+            # 2. Run migrations to add new columns to existing tables
             for migration in MIGRATIONS:
                 try:
                     self.conn.execute(migration)
                 except sqlite3.OperationalError:
-                    pass  # Column already exists
+                    pass  # Column/table already exists
+            # 3. Create indexes after migrations (so new columns exist)
+            self.conn.executescript(SCHEMA_INDEXES)
             self.conn.commit()
         return self.conn
 
