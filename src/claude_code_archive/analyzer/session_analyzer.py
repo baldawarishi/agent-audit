@@ -48,6 +48,70 @@ def load_global_synthesis_template() -> str:
     return template_path.read_text()
 
 
+def load_best_practices_reference() -> str:
+    """Load the best practices reference document.
+
+    Returns:
+        The best practices reference content.
+    """
+    template_path = Path(__file__).parent.parent / "prompts" / "best_practices_reference.md"
+    return template_path.read_text()
+
+
+def load_validation_template() -> str:
+    """Load the validation prompt template.
+
+    Returns:
+        The template string with placeholders.
+    """
+    template_path = Path(__file__).parent.parent / "prompts" / "best_practices_validation.md"
+    return template_path.read_text()
+
+
+def build_validation_prompt(synthesis_content: str) -> str:
+    """Build the validation prompt with synthesis and best practices.
+
+    Args:
+        synthesis_content: The global synthesis markdown with TOML
+
+    Returns:
+        Formatted prompt string.
+    """
+    template = load_validation_template()
+    best_practices = load_best_practices_reference()
+    return template.format(
+        synthesis=synthesis_content,
+        best_practices=best_practices,
+    )
+
+
+def load_fix_template() -> str:
+    """Load the recommendation fix prompt template.
+
+    Returns:
+        The template string with placeholders.
+    """
+    template_path = Path(__file__).parent.parent / "prompts" / "recommendation_fix.md"
+    return template_path.read_text()
+
+
+def build_fix_prompt(original_toml: str, validation_issues: str) -> str:
+    """Build the fix prompt with original TOML and validation issues.
+
+    Args:
+        original_toml: The original TOML recommendations block
+        validation_issues: Formatted string of issues to fix
+
+    Returns:
+        Formatted prompt string.
+    """
+    template = load_fix_template()
+    return template.format(
+        original_toml=original_toml,
+        validation_issues=validation_issues,
+    )
+
+
 def build_global_synthesis_prompt(
     analysis_files: list[Path],
     analysis_dir: Path,
@@ -208,10 +272,10 @@ class SessionAnalyzer:
         Raises:
             ValueError: If no analysis files are found.
         """
-        # Find all .md files except global-synthesis.md
+        # Find all .md files except synthesis and validation outputs
         analysis_files = [
             f for f in sorted(analysis_dir.glob("*.md"))
-            if f.name != "global-synthesis.md"
+            if f.name.lower() not in ("global-synthesis.md", "validation-report.md")
         ]
 
         if not analysis_files:
@@ -224,4 +288,31 @@ class SessionAnalyzer:
         )
 
         # Query Claude and return the response
+        return await self.client.query(prompt)
+
+    async def validate_against_best_practices(self, synthesis_content: str) -> str:
+        """Validate synthesis against best practices, returning validation report.
+
+        Args:
+            synthesis_content: The global synthesis markdown with TOML
+
+        Returns:
+            Validation report with PASS/NEEDS_REVISION/REJECT verdicts
+        """
+        prompt = build_validation_prompt(synthesis_content)
+        return await self.client.query(prompt)
+
+    async def fix_recommendations(
+        self, original_toml: str, validation_issues: str
+    ) -> str:
+        """Fix recommendations based on validation issues.
+
+        Args:
+            original_toml: The original TOML recommendations block
+            validation_issues: Formatted string describing issues to fix
+
+        Returns:
+            Corrected TOML block with fixed recommendations
+        """
+        prompt = build_fix_prompt(original_toml, validation_issues)
         return await self.client.query(prompt)

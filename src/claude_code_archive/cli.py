@@ -441,10 +441,11 @@ def _run_session_analysis(ctx, cfg: Config):
     from .analyzer.session_analyzer import SessionAnalyzer
     from .analyzer.claude_client import AnalyzerClaudeClient
 
-    # Hardcoded projects for Experiment 1
-    projects = ["java-tools-ai-tools-repo-drift", "claude-archive", "java-build-split"]
-
     db = Database(cfg.db_path)
+
+    # Get all projects from database
+    with db:
+        projects = db.get_stats()["projects"]
 
     # Create run directory with timestamp
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -496,16 +497,172 @@ def _run_session_analysis(ctx, cfg: Config):
             raise
 
 
+def _parse_validation_toml(validation_content: str) -> Optional[dict]:
+    """Parse validation report TOML, handling extra sections gracefully."""
+    import tomllib
+
+    toml_start = validation_content.find("```toml\n")
+    toml_end = validation_content.rfind("\n```")
+
+    if toml_start == -1 or toml_end == -1:
+        return None
+
+    toml_content = validation_content[toml_start + 8:toml_end]
+
+    # Try parsing full content first
+    try:
+        return tomllib.loads(toml_content)
+    except tomllib.TOMLDecodeError:
+        pass
+
+    # Try truncating at problematic sections
+    for stop_marker in ["\n[coverage_analysis]", "\ncritical_gaps", "\n[summary"]:
+        idx = toml_content.find(stop_marker)
+        if idx != -1:
+            try:
+                return tomllib.loads(toml_content[:idx])
+            except tomllib.TOMLDecodeError:
+                continue
+
+    return None
+
+
+def _format_validation_issues(data: dict) -> str:
+    """Format validation issues for the fix prompt."""
+    reviews = data.get("review", [])
+    issues_found = [r for r in reviews if r.get("verdict") != "PASS"]
+
+    if not issues_found:
+        return ""
+
+    lines = []
+    for review in issues_found:
+        verdict = review.get("verdict", "?")
+        title = review.get("title", "?")
+        lines.append(f"### [{verdict}] {title}")
+        lines.append("")
+        lines.append("**Issues:**")
+        for issue in review.get("issues", []):
+            lines.append(f"- {issue}")
+        if suggested_fix := review.get("suggested_fix"):
+            lines.append("")
+            lines.append("**Suggested fix:**")
+            lines.append(suggested_fix)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _extract_toml_from_synthesis(synthesis_content: str) -> Optional[str]:
+    """Extract the TOML block from synthesis markdown."""
+    toml_start = synthesis_content.find("```toml\n")
+    if toml_start == -1:
+        return None
+
+    # Find the end - need to handle embedded ``` in multi-line strings
+    # Use triple-quote tracking like the recommendations parser
+    block_start = toml_start + 8
+    scan_pos = block_start
+    in_triple_quote = False
+
+    while scan_pos < len(synthesis_content):
+        if synthesis_content[scan_pos:scan_pos + 3] == '"""':
+            in_triple_quote = not in_triple_quote
+            scan_pos += 3
+            continue
+
+        if not in_triple_quote and synthesis_content[scan_pos:scan_pos + 4] == '\n```':
+            after_fence = scan_pos + 4
+            if after_fence >= len(synthesis_content) or not synthesis_content[after_fence].isalpha():
+                return synthesis_content[block_start:scan_pos]
+
+        scan_pos += 1
+
+    return None
+
+
+def _replace_toml_in_synthesis(synthesis_content: str, new_toml: str) -> str:
+    """Replace the TOML block in synthesis with new content."""
+    toml_start = synthesis_content.find("```toml\n")
+    if toml_start == -1:
+        return synthesis_content
+
+    # Find the end using same logic as extract
+    block_start = toml_start + 8
+    scan_pos = block_start
+    in_triple_quote = False
+
+    while scan_pos < len(synthesis_content):
+        if synthesis_content[scan_pos:scan_pos + 3] == '"""':
+            in_triple_quote = not in_triple_quote
+            scan_pos += 3
+            continue
+
+        if not in_triple_quote and synthesis_content[scan_pos:scan_pos + 4] == '\n```':
+            after_fence = scan_pos + 4
+            if after_fence >= len(synthesis_content) or not synthesis_content[after_fence].isalpha():
+                # Found the end
+                toml_end = scan_pos
+                # Reconstruct with new TOML
+                before = synthesis_content[:toml_start]
+                after = synthesis_content[toml_end + 4:]  # Skip \n```
+                return f"{before}```toml\n{new_toml}\n```{after}"
+
+        scan_pos += 1
+
+    return synthesis_content
+
+
+def _summarize_validation(validation_content: str) -> tuple[Optional[dict], bool]:
+    """Parse and display validation report summary.
+
+    Returns:
+        Tuple of (parsed data, has_issues) where has_issues is True if any
+        recommendations need revision or were rejected.
+    """
+    data = _parse_validation_toml(validation_content)
+
+    if data is None:
+        click.echo("  (Validation TOML parse error - see validation-report.md for details)")
+        return None, False
+
+    # Display summary
+    validation = data.get("validation", {})
+    click.echo()
+    click.echo("Validation Summary:")
+    click.echo(f"  Total reviewed: {validation.get('total_reviewed', '?')}")
+    click.echo(f"  Passed: {validation.get('passed', '?')}")
+    click.echo(f"  Needs revision: {validation.get('needs_revision', '?')}")
+    click.echo(f"  Rejected: {validation.get('rejected', '?')}")
+
+    # Show issues for non-passing recommendations
+    reviews = data.get("review", [])
+    issues_found = [r for r in reviews if r.get("verdict") != "PASS"]
+
+    if issues_found:
+        click.echo()
+        click.echo("Issues found:")
+        for review in issues_found:
+            verdict = review.get("verdict", "?")
+            title = review.get("title", "?")
+            click.echo(f"  [{verdict}] {title}")
+            for issue in review.get("issues", []):
+                click.echo(f"    - {issue}")
+
+    has_issues = bool(issues_found)
+    return data, has_issues
+
+
 def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
     """Run global synthesis on existing per-project analyses."""
     import asyncio
     from .analyzer.session_analyzer import SessionAnalyzer
     from .analyzer.claude_client import AnalyzerClaudeClient
 
-    # Count analysis files (excluding global-synthesis.md)
+    # Count analysis files (excluding synthesis and validation outputs)
     analysis_files = [
         f for f in analysis_dir.glob("*.md")
-        if f.name != "global-synthesis.md"
+        if f.name.lower() not in ("global-synthesis.md", "validation-report.md")
     ]
 
     if not analysis_files:
@@ -535,10 +692,67 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
                 try:
                     result = await analyzer.synthesize_global(analysis_dir)
 
-                    # Write output
+                    # Write initial synthesis
                     output_path = analysis_dir / "global-synthesis.md"
                     output_path.write_text(result)
                     click.echo(f"Written: {output_path}")
+
+                    # Validation and fix loop
+                    max_iterations = 2
+                    for iteration in range(max_iterations):
+                        # Run validation phase (quality gate)
+                        click.echo()
+                        click.echo(f"Running quality validation (iteration {iteration + 1})...")
+                        validation_result = await analyzer.validate_against_best_practices(result)
+
+                        # Write validation report
+                        validation_path = analysis_dir / "validation-report.md"
+                        validation_path.write_text(validation_result)
+                        click.echo(f"Written: {validation_path}")
+
+                        # Parse and summarize validation results
+                        validation_data, has_issues = _summarize_validation(validation_result)
+
+                        if validation_data is None:
+                            click.echo()
+                            click.echo("Could not parse validation - skipping fix loop.")
+                            break
+
+                        if not has_issues:
+                            click.echo()
+                            click.echo("All recommendations passed validation.")
+                            break
+
+                        if iteration == max_iterations - 1:
+                            click.echo()
+                            click.echo("Max iterations reached. Some issues remain unfixed.")
+                            break
+
+                        # Extract issues and run fix
+                        click.echo()
+                        click.echo("Running recommendation fixes...")
+
+                        original_toml = _extract_toml_from_synthesis(result)
+                        if not original_toml:
+                            click.echo("  (Could not extract TOML from synthesis)")
+                            break
+
+                        issues_text = _format_validation_issues(validation_data)
+                        fixed_toml = await analyzer.fix_recommendations(original_toml, issues_text)
+
+                        # Extract just the TOML from the fix response
+                        fixed_toml_start = fixed_toml.find("```toml\n")
+                        fixed_toml_end = fixed_toml.rfind("\n```")
+                        if fixed_toml_start != -1 and fixed_toml_end > fixed_toml_start:
+                            fixed_toml_content = fixed_toml[fixed_toml_start + 8:fixed_toml_end]
+                        else:
+                            fixed_toml_content = fixed_toml
+
+                        # Replace TOML in synthesis
+                        result = _replace_toml_in_synthesis(result, fixed_toml_content)
+                        output_path.write_text(result)
+                        click.echo(f"Updated: {output_path}")
+
                 except ValueError as e:
                     click.echo(f"Error: {e}")
 

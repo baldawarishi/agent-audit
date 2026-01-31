@@ -65,11 +65,74 @@ class Recommendation:
                 return f"prompt-{slug}.md"
 
 
+def _extract_toml_blocks(content: str) -> list[str]:
+    """Extract all TOML blocks from markdown content.
+
+    Handles embedded ``` markers inside TOML multi-line strings by tracking
+    triple-quote state. A ``` only ends the TOML block if we're not inside
+    a triple-quoted string.
+
+    Args:
+        content: Markdown content with fenced TOML blocks
+
+    Returns:
+        List of TOML content strings (without fences)
+    """
+    blocks = []
+    pos = 0
+
+    while True:
+        # Find the next ```toml block
+        start = content.find("```toml\n", pos)
+        if start == -1:
+            break
+
+        block_start = start + 8  # Skip past "```toml\n"
+
+        # Scan through the content tracking triple-quote state
+        # We're looking for ``` that's NOT inside a """ string
+        scan_pos = block_start
+        in_triple_quote = False
+        end = -1
+
+        while scan_pos < len(content):
+            # Check for triple quote (""")
+            if content[scan_pos:scan_pos + 3] == '"""':
+                in_triple_quote = not in_triple_quote
+                scan_pos += 3
+                continue
+
+            # Check for closing fence ``` (only valid if not in triple quote)
+            if not in_triple_quote and content[scan_pos:scan_pos + 4] == '\n```':
+                # Verify this isn't a language specifier like ```python
+                after_fence = scan_pos + 4
+                if after_fence >= len(content):
+                    end = scan_pos
+                    break
+                next_char = content[after_fence]
+                if not next_char.isalpha():
+                    # This is the closing fence
+                    end = scan_pos
+                    break
+
+            scan_pos += 1
+
+        if end != -1:
+            blocks.append(content[block_start:end])
+            pos = end + 4
+        else:
+            # Unclosed block, skip it
+            pos = block_start
+
+    return blocks
+
+
 def parse_recommendations_from_synthesis(synthesis_path: Path) -> list[Recommendation]:
     """Parse recommendations from a global synthesis file.
 
-    The synthesis file should contain a TOML block with structured recommendations.
-    The block is delimited by ```toml and ``` markers.
+    The synthesis file should contain one or more TOML blocks with structured
+    recommendations. Each block is delimited by ```toml and ``` markers.
+    All [[recommendations]] from all blocks are combined.
 
     Args:
         synthesis_path: Path to the global-synthesis.md file
@@ -82,30 +145,37 @@ def parse_recommendations_from_synthesis(synthesis_path: Path) -> list[Recommend
     """
     content = synthesis_path.read_text()
 
-    # Find TOML block in synthesis
-    # The TOML block should be at the end of the file, delimited by ```toml and ```
-    toml_start = content.find("```toml\n")
-    if toml_start == -1:
+    # Extract all TOML blocks
+    toml_blocks = _extract_toml_blocks(content)
+
+    if not toml_blocks:
         raise ValueError(
             f"No TOML block found in {synthesis_path}. "
             "Ensure synthesis was generated with structured output enabled."
         )
 
-    # Use rfind to find the LAST ``` (the TOML block is at the end and may contain
-    # embedded ``` inside multi-line strings)
-    toml_end = content.rfind("\n```")
-    if toml_end == -1 or toml_end <= toml_start:
-        raise ValueError(f"Unclosed TOML block in {synthesis_path}")
+    # Parse each block and collect all recommendations
+    # Some blocks may have invalid TOML (e.g., unescaped backslashes from LLM output)
+    # We parse what we can and warn about failures
+    all_recommendations_data = []
+    parse_warnings = []
+    for i, toml_content in enumerate(toml_blocks):
+        try:
+            data = tomllib.loads(toml_content)
+            all_recommendations_data.extend(data.get("recommendations", []))
+        except tomllib.TOMLDecodeError as e:
+            parse_warnings.append(f"Warning: Skipping TOML block {i + 1}: {e}")
 
-    toml_content = content[toml_start + 8 : toml_end]
-
-    try:
-        data = tomllib.loads(toml_content)
-    except tomllib.TOMLDecodeError as e:
-        raise ValueError(f"Invalid TOML in synthesis file: {e}")
+    if not all_recommendations_data:
+        if parse_warnings:
+            raise ValueError(
+                f"No valid recommendations found. TOML parse errors:\n"
+                + "\n".join(parse_warnings)
+            )
+        raise ValueError("No recommendations found in any TOML block")
 
     recommendations = []
-    for rec_data in data.get("recommendations", []):
+    for rec_data in all_recommendations_data:
         try:
             category = RecommendationCategory(rec_data.get("category", "workflow"))
         except ValueError:
