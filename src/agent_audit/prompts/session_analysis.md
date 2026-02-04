@@ -35,6 +35,57 @@ Examples:
 - "[INFERRING THIS WAS A RETRY BASED ON SIMILAR TASK IN PREVIOUS SESSION]"
 - "[UNCLEAR IF THIS DELAY WAS INTENTIONAL OR A PROBLEM]"
 
+## Verification Protocol
+
+**CRITICAL**: Flagging an inference is NOT the end—it triggers mandatory verification. This follows the Chain-of-Verification (CoVe) approach to reduce hallucinated conclusions.
+
+### When You Flag an Inference, You MUST:
+
+1. **Generate Verification Questions** (independently from the inference)
+   - What specific evidence would confirm or refute this inference?
+   - What file/quote/metric would I need to see?
+   - Are there alternative explanations for what I observed?
+
+2. **Execute Verification** (attempt to answer each question)
+   - Read the actual session file if you haven't already
+   - Search for corroborating evidence (multiple indicators strengthen confidence)
+   - Check against metrics (message count, token usage, timestamps)
+   - Look for contradicting evidence—actively try to disprove your inference
+
+3. **Mark Verification Status**
+   - `[VERIFIED: inference]` — Found direct evidence supporting the inference
+   - `[UNVERIFIED: inference]` — Attempted verification but couldn't confirm
+   - `[CONTRADICTED: inference]` — Found evidence against the inference
+
+4. **Document Verification Attempt**
+   For UNVERIFIED or CONTRADICTED inferences, note:
+   - What verification was attempted
+   - What was found (or not found)
+   - Confidence level (low/medium) and why
+
+### Verification Examples
+
+**WRONG** (stopping at the inference):
+> "[INFERRING USER WAS FRUSTRATED BASED ON SHORT RESPONSES]"
+> Rating: Ugly
+
+**RIGHT** (completing verification):
+> "[INFERRING USER WAS FRUSTRATED BASED ON SHORT RESPONSES]"
+> Verification: Checking transcript for user tone indicators...
+> - User messages in turns 5-8: "ok", "try again", "no", "just fix it"
+> - No positive feedback or thanks throughout session
+> - Session ended abruptly without completion confirmation
+> [VERIFIED: USER WAS FRUSTRATED — multiple terse responses, no positive signals, abrupt ending]
+> Rating: Ugly
+
+**RIGHT** (when verification fails):
+> "[INFERRING THIS WAS A RETRY OF A PREVIOUS FAILED TASK]"
+> Verification: Searching for similar tasks in other session files...
+> - No other sessions found with matching task description
+> - Cannot access previous session history
+> [UNVERIFIED: POSSIBLE RETRY — no corroborating sessions found; basing only on user's phrasing "let's try this again"]
+> Confidence: Low — single indicator only
+
 ## Required Process
 
 ### 1. Session Sampling (MANDATORY)
@@ -101,6 +152,8 @@ Answer honestly:
 1. "Which sessions did I skip? Could they contain issues?"
 2. "For each 'Ugly' rating - did I provide a direct quote as evidence?"
 3. "For each 'Good' rating - is it actually below median, or am I being generous?"
+4. "Did I complete the Verification Protocol for every [INFERENCE] and [ASSUMPTION] I flagged?"
+5. "How many inferences are VERIFIED vs UNVERIFIED? Do I have too many unverified claims?"
 
 ### 5. Quantified Summary
 
@@ -122,3 +175,5 @@ Only after completing above. Each suggestion must reference a specific problem f
 - Do NOT skip large sessions - they're mandatory review targets
 - Do NOT report issues without direct quotes as evidence
 - Do NOT fabricate problems - "no issues found" with evidence is valid
+- Do NOT stop at flagging an inference — you MUST complete the Verification Protocol
+- Do NOT base ratings on UNVERIFIED inferences alone — seek additional evidence or lower confidence
