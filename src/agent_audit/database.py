@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     is_warmup BOOLEAN DEFAULT FALSE,
     is_sidechain BOOLEAN DEFAULT FALSE,
     github_repo TEXT,
+    repo TEXT,
+    repo_platform TEXT,
     session_context TEXT
 );
 
@@ -85,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_github_repo ON sessions(github_repo);
+CREATE INDEX IF NOT EXISTS idx_sessions_repo ON sessions(repo);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent_type ON sessions(agent_type);
 CREATE INDEX IF NOT EXISTS idx_commits_session ON commits(session_id);
 CREATE INDEX IF NOT EXISTS idx_commits_hash ON commits(commit_hash);
@@ -122,6 +125,11 @@ MIGRATIONS = [
     # Phase 5: Multi-agent support (Codex, etc.)
     "ALTER TABLE sessions ADD COLUMN agent_type TEXT DEFAULT 'claude-code'",
     "CREATE INDEX IF NOT EXISTS idx_sessions_agent_type ON sessions(agent_type)",
+    # Phase 6: Generalize github_repo to repo (platform-agnostic)
+    "ALTER TABLE sessions ADD COLUMN repo TEXT",
+    "ALTER TABLE sessions ADD COLUMN repo_platform TEXT",
+    "UPDATE sessions SET repo = github_repo WHERE github_repo IS NOT NULL AND repo IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_repo ON sessions(repo)",
 ]
 
 
@@ -180,8 +188,8 @@ class Database:
             INSERT OR REPLACE INTO sessions
             (id, project, agent_type, cwd, git_branch, slug, summary, title, parent_session_id, started_at, ended_at,
              claude_version, total_input_tokens, total_output_tokens, total_cache_read_tokens, model,
-             is_warmup, is_sidechain, github_repo, session_context)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             is_warmup, is_sidechain, github_repo, repo, repo_platform, session_context)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session.id,
@@ -202,7 +210,9 @@ class Database:
                 session.model,
                 session.is_warmup,
                 session.is_sidechain,
-                session.github_repo,
+                session.repo,  # also written to github_repo for compat
+                session.repo,
+                session.repo_platform,
                 session.session_context,
             ),
         )
@@ -359,14 +369,18 @@ class Database:
         )
         return [dict(row) for row in cursor.fetchall()]
 
-    def get_sessions_by_github_repo(self, github_repo: str) -> list[dict]:
-        """Get all sessions associated with a GitHub repo."""
+    def get_sessions_by_repo(self, repo: str) -> list[dict]:
+        """Get all sessions associated with a repo (owner/name)."""
         conn = self.connect()
         cursor = conn.execute(
-            "SELECT * FROM sessions WHERE github_repo = ? ORDER BY started_at DESC",
-            (github_repo,),
+            "SELECT * FROM sessions WHERE repo = ? ORDER BY started_at DESC",
+            (repo,),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def get_sessions_by_github_repo(self, github_repo: str) -> list[dict]:
+        """Deprecated: use ``get_sessions_by_repo`` instead."""
+        return self.get_sessions_by_repo(github_repo)
 
     def get_stats(self) -> dict:
         """Get overall archive statistics."""
@@ -398,9 +412,11 @@ class Database:
         stats["projects"] = [row["project"] for row in cursor.fetchall()]
 
         cursor = conn.execute(
-            "SELECT DISTINCT github_repo FROM sessions WHERE github_repo IS NOT NULL"
+            "SELECT DISTINCT repo FROM sessions WHERE repo IS NOT NULL"
         )
-        stats["github_repos"] = [row["github_repo"] for row in cursor.fetchall()]
+        stats["repos"] = [row["repo"] for row in cursor.fetchall()]
+        # Deprecated alias
+        stats["github_repos"] = stats["repos"]
 
         return stats
 

@@ -428,6 +428,8 @@ def render(
                 parent_session_id=session_dict.get("parent_session_id"),
                 is_warmup=bool(session_dict.get("is_warmup", False)),
                 is_sidechain=bool(session_dict.get("is_sidechain", False)),
+                repo=session_dict.get("repo"),
+                repo_platform=session_dict.get("repo_platform"),
                 messages=messages,
                 tool_calls=tool_calls,
                 tool_results=tool_results,

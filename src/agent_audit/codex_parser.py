@@ -10,7 +10,9 @@ from typing import Any, Iterator
 from .models import (
     Commit,
     COMMIT_PATTERN,
-    GITHUB_REPO_PATTERN,
+    REPO_PUSH_PATTERN,
+    REPO_URL_PATTERN,
+    detect_platform,
     Message,
     Session,
     ToolCall,
@@ -108,7 +110,7 @@ def parse_codex_session(file_path: Path, project_name: str) -> Session:
     all_tool_calls: list[ToolCall] = []
     all_tool_results: list[ToolResult] = []
     all_commits: list[Commit] = []
-    detected_github_repo: str | None = None
+    detected_repo: str | None = None
 
     total_input = 0
     total_output = 0
@@ -292,11 +294,11 @@ def parse_codex_session(file_path: Path, project_name: str) -> Session:
                                 timestamp=timestamp,
                             )
                         )
-                    # Detect GitHub repo
-                    if not detected_github_repo:
-                        repo_match = GITHUB_REPO_PATTERN.search(output)
+                    # Detect repo from push output
+                    if not detected_repo:
+                        repo_match = REPO_PUSH_PATTERN.search(output)
                         if repo_match:
-                            detected_github_repo = repo_match.group(1)
+                            detected_repo = repo_match.group(1)
                 continue
 
             # User/assistant messages in response_item
@@ -356,8 +358,9 @@ def parse_codex_session(file_path: Path, project_name: str) -> Session:
     session.total_output_tokens = total_output
     session.total_cache_read_tokens = total_cache
 
-    if not session.github_repo and detected_github_repo:
-        session.github_repo = detected_github_repo
+    if not session.repo and detected_repo:
+        session.repo = detected_repo
+        session.repo_platform = "github"  # push pattern is GitHub-specific
 
     # Detect warmup sessions
     session.is_warmup = _is_warmup_session(session)
@@ -378,10 +381,14 @@ def _process_session_meta(session: Session, payload: dict) -> None:
         if git_info.get("branch"):
             session.git_branch = git_info.get("branch")
         repo_url = git_info.get("repository_url")
-        if isinstance(repo_url, str) and "github.com" in repo_url:
-            match = re.search(r"github\.com[/:]([^/]+/[^/]+?)(?:\.git)?$", repo_url)
+        if isinstance(repo_url, str):
+            match = REPO_URL_PATTERN.search(repo_url)
             if match:
-                session.github_repo = match.group(1)
+                hostname = match.group(1)
+                path = match.group(2)
+                platform = detect_platform(hostname)
+                session.repo = path
+                session.repo_platform = platform
 
 
 def _extract_text_from_content(content: Any) -> str:

@@ -714,17 +714,21 @@ class TestDatabase:
         assert stats["min_tokens"] == 0
         assert stats["max_tokens"] == 0
 
-    def test_stores_github_repo(self, db):
-        """Test storing and retrieving github_repo field."""
+    def test_stores_repo(self, db):
+        """Test storing and retrieving repo field."""
         session = Session(
-            id="github-session",
+            id="repo-session",
             project="test",
-            github_repo="owner/repo-name",
+            repo="owner/repo-name",
+            repo_platform="github",
         )
         db.insert_session(session)
 
         sessions = db.get_all_sessions()
         assert len(sessions) == 1
+        assert sessions[0]["repo"] == "owner/repo-name"
+        assert sessions[0]["repo_platform"] == "github"
+        # Backward compat: github_repo column also populated
         assert sessions[0]["github_repo"] == "owner/repo-name"
 
     def test_stores_title(self, db):
@@ -828,20 +832,24 @@ class TestDatabase:
         assert commits[1]["commit_hash"] == "def5678"
         assert commits[1]["message"] == "Add feature"
 
-    def test_get_sessions_by_github_repo(self, db):
-        """Test getting sessions by github_repo."""
-        session1 = Session(id="s1", project="p1", github_repo="owner/repo")
-        session2 = Session(id="s2", project="p2", github_repo="owner/repo")
-        session3 = Session(id="s3", project="p3", github_repo="other/repo")
+    def test_get_sessions_by_repo(self, db):
+        """Test getting sessions by repo."""
+        session1 = Session(id="s1", project="p1", repo="owner/repo")
+        session2 = Session(id="s2", project="p2", repo="owner/repo")
+        session3 = Session(id="s3", project="p3", repo="other/repo")
 
         db.insert_session(session1)
         db.insert_session(session2)
         db.insert_session(session3)
 
-        sessions = db.get_sessions_by_github_repo("owner/repo")
+        sessions = db.get_sessions_by_repo("owner/repo")
         assert len(sessions) == 2
         ids = {s["id"] for s in sessions}
         assert ids == {"s1", "s2"}
+
+        # Deprecated alias still works
+        sessions2 = db.get_sessions_by_github_repo("owner/repo")
+        assert len(sessions2) == 2
 
     def test_stats_includes_commits(self, db):
         """Test that stats include commit count."""
@@ -870,10 +878,10 @@ class TestDatabase:
         stats = db.get_stats()
         assert stats["total_commits"] == 2
 
-    def test_stats_includes_github_repos(self, db):
-        """Test that stats include github_repos list."""
-        session1 = Session(id="s1", project="p1", github_repo="owner/repo1")
-        session2 = Session(id="s2", project="p2", github_repo="owner/repo2")
+    def test_stats_includes_repos(self, db):
+        """Test that stats include repos list."""
+        session1 = Session(id="s1", project="p1", repo="owner/repo1")
+        session2 = Session(id="s2", project="p2", repo="owner/repo2")
         session3 = Session(id="s3", project="p3")  # No repo
 
         db.insert_session(session1)
@@ -881,5 +889,8 @@ class TestDatabase:
         db.insert_session(session3)
 
         stats = db.get_stats()
+        assert "repos" in stats
+        assert set(stats["repos"]) == {"owner/repo1", "owner/repo2"}
+        # Deprecated alias
         assert "github_repos" in stats
         assert set(stats["github_repos"]) == {"owner/repo1", "owner/repo2"}

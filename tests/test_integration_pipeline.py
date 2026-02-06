@@ -220,7 +220,7 @@ class TestClaudeCodePipeline:
         assert session.git_branch == "feature/login"
         assert session.slug == "bright-coding-fox"
         assert session.title == "Implement login flow"
-        assert session.github_repo == "acme/myproject"
+        assert session.repo == "acme/myproject"
         assert session.parent_session_id == "parent-session-abc"
         assert session.model == "claude-opus-4-5-20251101"
         assert session.total_input_tokens == 1100  # 500 + 600
@@ -247,7 +247,7 @@ class TestClaudeCodePipeline:
         assert retrieved["git_branch"] == "feature/login"
         assert retrieved["slug"] == "bright-coding-fox"
         assert retrieved["title"] == "Implement login flow"
-        assert retrieved["github_repo"] == "acme/myproject"
+        assert retrieved["repo"] == "acme/myproject"
         assert retrieved["parent_session_id"] == "parent-session-abc"
         assert retrieved["model"] == "claude-opus-4-5-20251101"
         assert retrieved["total_input_tokens"] == 1100
@@ -317,7 +317,7 @@ class TestCodexPipeline:
         assert session.project == "codex-project"
         assert session.cwd == "/home/dev/codex-project"
         assert session.git_branch == "main"
-        assert session.github_repo == "acme/codex-project"
+        assert session.repo == "acme/codex-project"
         assert session.claude_version == "codex-0.5.2"
         assert session.model == "o3-mini"
         assert session.total_input_tokens == 300
@@ -349,7 +349,7 @@ class TestCodexPipeline:
         assert len(rows) == 1
         retrieved = rows[0]
         assert retrieved["agent_type"] == "codex"
-        assert retrieved["github_repo"] == "acme/codex-project"
+        assert retrieved["repo"] == "acme/codex-project"
         assert retrieved["model"] == "o3-mini"
         assert retrieved["total_input_tokens"] == 300
 
@@ -470,7 +470,8 @@ class TestRegressionBugs:
         full_session = Session(
             id="new-session",
             project="new-project",
-            github_repo="acme/repo",
+            repo="acme/repo",
+            repo_platform="github",
             parent_session_id="parent-123",
             title="Test title",
             agent_type="codex",
@@ -496,7 +497,8 @@ class TestRegressionBugs:
 
         retrieved = db.get_sessions_by_project("new-project")
         assert len(retrieved) == 1
-        assert retrieved[0]["github_repo"] == "acme/repo"
+        assert retrieved[0]["repo"] == "acme/repo"
+        assert retrieved[0]["repo_platform"] == "github"
         assert retrieved[0]["agent_type"] == "codex"
         assert retrieved[0]["title"] == "Test title"
 
@@ -524,7 +526,8 @@ class TestRegressionBugs:
             model="claude-opus-4-5-20251101",
             is_warmup=False,
             is_sidechain=True,
-            github_repo="acme/test",
+            repo="acme/test",
+            repo_platform="github",
             session_context='{"foo": "bar"}',
             messages=[
                 Message(
@@ -592,7 +595,8 @@ class TestRegressionBugs:
         assert session_dict["slug"] == "test-slug"
         assert session_dict["summary"] == "A test summary"
         assert session_dict["title"] == "Test Title"
-        assert session_dict["github_repo"] == "acme/test"
+        assert session_dict["repo"] == "acme/test"
+        assert session_dict["repo_platform"] == "github"
         assert session_dict["session_context"] == '{"foo": "bar"}'
         assert session_dict["agent_type"] == "claude-code"
         assert session_dict["is_warmup"] == 0  # SQLite stores as int

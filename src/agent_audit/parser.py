@@ -9,7 +9,9 @@ from typing import Iterator
 from .models import (
     Commit,
     COMMIT_PATTERN,
-    GITHUB_REPO_PATTERN,
+    REPO_PUSH_PATTERN,
+    REPO_URL_PATTERN,
+    detect_platform,
     Message,
     Session,
     ToolCall,
@@ -128,8 +130,8 @@ def extract_commits(content, session_id: str, timestamp: str) -> list[Commit]:
     return commits
 
 
-def detect_github_repo_from_content(content) -> str | None:
-    """Detect GitHub repo from git push output in tool results.
+def detect_repo_from_content(content) -> str | None:
+    """Detect repo from git push output in tool results.
 
     Looks for patterns like: github.com/owner/repo/pull/new/branch
     """
@@ -138,20 +140,30 @@ def detect_github_repo_from_content(content) -> str | None:
             if isinstance(block, dict) and block.get("type") == "tool_result":
                 result_content = block.get("content", "")
                 if isinstance(result_content, str):
-                    match = GITHUB_REPO_PATTERN.search(result_content)
+                    match = REPO_PUSH_PATTERN.search(result_content)
                     if match:
                         return match.group(1)
     return None
 
 
-def extract_repo_from_session_context(session_context: dict) -> str | None:
-    """Extract GitHub repo from session_context metadata.
+# Deprecated alias
+detect_github_repo_from_content = detect_repo_from_content
+
+
+def extract_repo_from_session_context(
+    session_context: dict,
+) -> tuple[str | None, str | None]:
+    """Extract repo from session_context metadata.
 
     Looks in session_context.outcomes for git_info.repo,
     or parses from session_context.sources URL.
+
+    Returns:
+        (repo, platform) tuple where repo is "owner/name" and platform
+        is "github", "gitlab", "bitbucket", or None.
     """
     if not session_context:
-        return None
+        return None, None
 
     # Try outcomes first (has clean repo format)
     outcomes = session_context.get("outcomes", [])
@@ -160,20 +172,23 @@ def extract_repo_from_session_context(session_context: dict) -> str | None:
             git_info = outcome.get("git_info", {})
             repo = git_info.get("repo")
             if repo:
-                return repo
+                # outcomes don't include the host; assume github for
+                # backward compat when no URL is available
+                return repo, None
 
     # Fall back to sources URL
     sources = session_context.get("sources", [])
     for source in sources:
         if source.get("type") == "git_repository":
             url = source.get("url", "")
-            # Parse github.com/owner/repo from URL
-            if "github.com/" in url:
-                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?$", url)
-                if match:
-                    return match.group(1)
+            match = REPO_URL_PATTERN.search(url)
+            if match:
+                hostname = match.group(1)
+                path = match.group(2)
+                platform = detect_platform(hostname)
+                return path, platform
 
-    return None
+    return None, None
 
 
 def has_image_content(content) -> bool:
@@ -241,7 +256,7 @@ def parse_session(file_path: Path, project_name: str) -> Session:
     all_tool_calls = []
     all_tool_results = []
     all_commits = []
-    detected_github_repo = None
+    detected_repo = None
 
     total_input = 0
     total_output = 0
@@ -283,11 +298,13 @@ def parse_session(file_path: Path, project_name: str) -> Session:
         if not session.session_context and entry.get("session_context"):
             session_context = entry.get("session_context")
             session.session_context = json.dumps(session_context)
-            # Try to extract GitHub repo from session_context
+            # Try to extract repo from session_context
             if isinstance(session_context, dict):
-                repo = extract_repo_from_session_context(session_context)
+                repo, platform = extract_repo_from_session_context(session_context)
                 if repo:
-                    session.github_repo = repo
+                    session.repo = repo
+                    if platform:
+                        session.repo_platform = platform
 
         # Extract title if present
         if not session.title and entry.get("title"):
@@ -359,8 +376,8 @@ def parse_session(file_path: Path, project_name: str) -> Session:
                 commits = extract_commits(content, session_id, timestamp)
                 all_commits.extend(commits)
                 # Try to detect GitHub repo from git push output
-                if not detected_github_repo:
-                    detected_github_repo = detect_github_repo_from_content(content)
+                if not detected_repo:
+                    detected_repo = detect_repo_from_content(content)
             else:
                 msg_type = "user"
         elif entry_type == "assistant":
@@ -404,9 +421,10 @@ def parse_session(file_path: Path, project_name: str) -> Session:
     session.total_output_tokens = total_output
     session.total_cache_read_tokens = total_cache
 
-    # Set GitHub repo from content detection if not already set from session_context
-    if not session.github_repo and detected_github_repo:
-        session.github_repo = detected_github_repo
+    # Set repo from content detection if not already set from session_context
+    if not session.repo and detected_repo:
+        session.repo = detected_repo
+        session.repo_platform = "github"  # push pattern is GitHub-specific
 
     # Detect warmup and sidechain sessions
     session.is_warmup = is_warmup_session(session)

@@ -74,7 +74,7 @@ class TestUserMessageDeduplication:
         assert len(user_msgs) == 2
 
 
-class TestGitHubRepoExtraction:
+class TestRepoExtraction:
     def test_https_url(self):
         rollout = [
             {
@@ -92,7 +92,8 @@ class TestGitHubRepoExtraction:
 
         session = parse_codex_session(path, "proj")
         path.unlink()
-        assert session.github_repo == "acme/repo"
+        assert session.repo == "acme/repo"
+        assert session.repo_platform == "github"
 
     def test_ssh_url(self):
         rollout = [
@@ -111,9 +112,10 @@ class TestGitHubRepoExtraction:
 
         session = parse_codex_session(path, "proj")
         path.unlink()
-        assert session.github_repo == "acme/repo"
+        assert session.repo == "acme/repo"
+        assert session.repo_platform == "github"
 
-    def test_non_github_url_produces_no_repo(self):
+    def test_gitlab_url_produces_repo(self):
         rollout = [
             {
                 "type": "session_meta",
@@ -130,7 +132,68 @@ class TestGitHubRepoExtraction:
 
         session = parse_codex_session(path, "proj")
         path.unlink()
-        assert session.github_repo is None
+        assert session.repo == "org/repo"
+        assert session.repo_platform == "gitlab"
+
+    def test_gitlab_nested_groups(self):
+        rollout = [
+            {
+                "type": "session_meta",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "payload": {
+                    "cwd": "/proj",
+                    "git": {"branch": "main", "repository_url": "https://gitlab.com/group/subgroup/project.git"},
+                },
+            },
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
+            path = Path(f.name)
+        _write_jsonl(rollout, path)
+
+        session = parse_codex_session(path, "proj")
+        path.unlink()
+        assert session.repo == "group/subgroup/project"
+        assert session.repo_platform == "gitlab"
+
+    def test_bitbucket_url(self):
+        rollout = [
+            {
+                "type": "session_meta",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "payload": {
+                    "cwd": "/proj",
+                    "git": {"branch": "main", "repository_url": "https://bitbucket.org/team/repo.git"},
+                },
+            },
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
+            path = Path(f.name)
+        _write_jsonl(rollout, path)
+
+        session = parse_codex_session(path, "proj")
+        path.unlink()
+        assert session.repo == "team/repo"
+        assert session.repo_platform == "bitbucket"
+
+    def test_unknown_host_url(self):
+        rollout = [
+            {
+                "type": "session_meta",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "payload": {
+                    "cwd": "/proj",
+                    "git": {"branch": "main", "repository_url": "https://git.corp.example.com/team/repo.git"},
+                },
+            },
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f:
+            path = Path(f.name)
+        _write_jsonl(rollout, path)
+
+        session = parse_codex_session(path, "proj")
+        path.unlink()
+        assert session.repo == "team/repo"
+        assert session.repo_platform is None  # unrecognized host
 
 
 class TestToolCallArgumentParsing:

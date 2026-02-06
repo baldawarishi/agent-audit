@@ -11,6 +11,7 @@ from agent_audit.parser import (
     extract_tool_calls,
     extract_tool_results,
     extract_commits,
+    detect_repo_from_content,
     detect_github_repo_from_content,
     extract_repo_from_session_context,
     has_image_content,
@@ -705,7 +706,7 @@ class TestExtractCommits:
         assert len(commits) == 0
 
 
-class TestDetectGitHubRepoFromContent:
+class TestDetectRepoFromContent:
     def test_detects_repo_from_git_push(self):
         content = [
             {
@@ -714,7 +715,7 @@ class TestDetectGitHubRepoFromContent:
                 "content": "remote: Create a pull request for 'feature' on GitHub by visiting:\nremote:      https://github.com/owner/repo/pull/new/feature\n",
             }
         ]
-        repo = detect_github_repo_from_content(content)
+        repo = detect_repo_from_content(content)
         assert repo == "owner/repo"
 
     def test_returns_none_when_no_match(self):
@@ -725,12 +726,24 @@ class TestDetectGitHubRepoFromContent:
                 "content": "Just some regular output",
             }
         ]
-        repo = detect_github_repo_from_content(content)
+        repo = detect_repo_from_content(content)
         assert repo is None
 
     def test_handles_non_list_content(self):
-        repo = detect_github_repo_from_content("string content")
+        repo = detect_repo_from_content("string content")
         assert repo is None
+
+    def test_deprecated_alias_works(self):
+        """detect_github_repo_from_content still works as an alias."""
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "tool-1",
+                "content": "https://github.com/owner/repo/pull/new/feature",
+            }
+        ]
+        repo = detect_github_repo_from_content(content)
+        assert repo == "owner/repo"
 
 
 class TestExtractRepoFromSessionContext:
@@ -740,8 +753,9 @@ class TestExtractRepoFromSessionContext:
                 {"type": "git_repository", "git_info": {"repo": "owner/repo-name"}}
             ]
         }
-        repo = extract_repo_from_session_context(session_context)
+        repo, platform = extract_repo_from_session_context(session_context)
         assert repo == "owner/repo-name"
+        assert platform is None  # outcomes don't include hostname
 
     def test_extracts_from_sources_url(self):
         session_context = {
@@ -752,8 +766,35 @@ class TestExtractRepoFromSessionContext:
                 }
             ]
         }
-        repo = extract_repo_from_session_context(session_context)
+        repo, platform = extract_repo_from_session_context(session_context)
         assert repo == "owner/my-project"
+        assert platform == "github"
+
+    def test_extracts_gitlab_from_sources_url(self):
+        session_context = {
+            "sources": [
+                {
+                    "type": "git_repository",
+                    "url": "https://gitlab.com/group/subgroup/project.git",
+                }
+            ]
+        }
+        repo, platform = extract_repo_from_session_context(session_context)
+        assert repo == "group/subgroup/project"
+        assert platform == "gitlab"
+
+    def test_extracts_bitbucket_from_sources_url(self):
+        session_context = {
+            "sources": [
+                {
+                    "type": "git_repository",
+                    "url": "https://bitbucket.org/team/repo.git",
+                }
+            ]
+        }
+        repo, platform = extract_repo_from_session_context(session_context)
+        assert repo == "team/repo"
+        assert platform == "bitbucket"
 
     def test_prefers_outcomes_over_sources(self):
         session_context = {
@@ -764,12 +805,12 @@ class TestExtractRepoFromSessionContext:
                 {"type": "git_repository", "url": "https://github.com/sources/repo.git"}
             ],
         }
-        repo = extract_repo_from_session_context(session_context)
+        repo, platform = extract_repo_from_session_context(session_context)
         assert repo == "outcomes/repo"
 
     def test_returns_none_for_empty_context(self):
-        assert extract_repo_from_session_context(None) is None
-        assert extract_repo_from_session_context({}) is None
+        assert extract_repo_from_session_context(None) == (None, None)
+        assert extract_repo_from_session_context({}) == (None, None)
 
 
 class TestHasImageContent:
@@ -826,7 +867,7 @@ class TestParseSessionNewFields:
             assert len(session.messages) == 1
             assert session.messages[0].is_compact_summary is True
 
-    def test_parses_github_repo_from_context(self):
+    def test_parses_repo_from_context(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
             f.write(
                 json.dumps(
@@ -850,9 +891,11 @@ class TestParseSessionNewFields:
             f.flush()
 
             session = parse_session(Path(f.name), "test-project")
+            assert session.repo == "owner/my-repo"
+            # Deprecated alias still works
             assert session.github_repo == "owner/my-repo"
 
-    def test_parses_github_repo_from_git_push(self):
+    def test_parses_repo_from_git_push(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
             f.write(
                 json.dumps(
@@ -877,7 +920,8 @@ class TestParseSessionNewFields:
             f.flush()
 
             session = parse_session(Path(f.name), "test-project")
-            assert session.github_repo == "owner/repo"
+            assert session.repo == "owner/repo"
+            assert session.repo_platform == "github"
 
     def test_parses_commits_from_tool_results(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
