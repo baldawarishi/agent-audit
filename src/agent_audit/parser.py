@@ -1,7 +1,6 @@
 """Parse Claude Code JSONL session files."""
 
 import json
-import re
 import uuid
 from pathlib import Path
 from typing import Iterator

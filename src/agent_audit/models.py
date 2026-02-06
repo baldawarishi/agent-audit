@@ -1,7 +1,6 @@
 """Data models for Claude Code archive."""
 
 import re
-import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
