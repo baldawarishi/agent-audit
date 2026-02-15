@@ -4,13 +4,10 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from agent_audit.codex_parser import (
     parse_codex_session,
     discover_codex_sessions,
     get_session_id_from_filename,
-    get_codex_home,
 )
 
 

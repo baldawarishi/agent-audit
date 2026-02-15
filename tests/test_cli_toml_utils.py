@@ -1,7 +1,5 @@
 """Tests for CLI TOML utility functions."""
 
-import pytest
-
 from agent_audit.cli import (
     _extract_toml_from_synthesis,
     _replace_toml_in_synthesis,

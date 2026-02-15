@@ -10,7 +10,7 @@ import pytest
 from agent_audit.database import Database
 from agent_audit.models import Session, Message, ToolCall, ToolResult, Commit
 from agent_audit.parser import parse_session
-from agent_audit.codex_parser import parse_codex_session, get_session_id_from_filename
+from agent_audit.codex_parser import parse_codex_session
 from agent_audit.toml_renderer import render_session_toml
 
 
