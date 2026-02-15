@@ -48,6 +48,9 @@ uv run agent-audit analyze --synthesize archive/analysis/run-YYYYMMDD-HHMMSS
 # Generate recommendation files from synthesis
 uv run agent-audit analyze --recommend archive/analysis/run-YYYYMMDD-HHMMSS/global-synthesis.md
 
+# Prepare debrief context for a session
+uv run agent-audit debrief --session abc123
+
 # Configure archive/projects directories
 uv run agent-audit config --archive-dir /path/to/archive
 uv run agent-audit config --show
@@ -62,6 +65,10 @@ uv run agent-audit config --show
   - `global-synthesis.md` - Cross-project patterns with TOML recommendations
   - `validation-report.md` - Quality gate results
   - `recommendations/` - Generated recommendation files
+- `archive/debriefs/{date}_{slug}/` - Debrief context bundles:
+  - `session-guide.md` - Interactive session guide for Claude Code
+  - `context/` - Gathered context (transcripts, git log, PRs, metrics)
+  - `drafts/` - Draft output directory
 
 ## Configuration
 

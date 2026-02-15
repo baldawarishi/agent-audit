@@ -599,6 +599,28 @@ class Database:
             "p90_tokens": row["p90_tokens"] or 0,
         }
 
+    def get_session_by_id_prefix(self, prefix: str) -> Optional[dict]:
+        """Find a single session by ID prefix match.
+
+        Returns None if no match. Raises ValueError if the prefix is ambiguous
+        (matches multiple sessions).
+        """
+        conn = self.connect()
+        cursor = conn.execute(
+            "SELECT * FROM sessions WHERE id LIKE ? ORDER BY started_at DESC",
+            (prefix + "%",),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            ids = [row["id"] for row in rows]
+            raise ValueError(
+                f"Ambiguous session prefix '{prefix}' matches {len(rows)} sessions: "
+                + ", ".join(ids[:5])
+            )
+        return dict(rows[0])
+
     def get_project_session_stats(self, project: str) -> dict:
         """Get session statistics for a specific project.
 

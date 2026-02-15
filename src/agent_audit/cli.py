@@ -941,6 +941,60 @@ def _run_global_synthesis(ctx, cfg: Config, analysis_dir: Path):
             raise
 
 
+@main.command()
+@click.option(
+    "--session",
+    "session_id",
+    type=str,
+    required=True,
+    help="Session ID (prefix match) to debrief",
+)
+@click.option(
+    "--archive-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to archive directory (overrides config)",
+)
+@click.pass_context
+def debrief(ctx, session_id: str, archive_dir: Optional[Path]):
+    """Prepare a debrief context bundle for a session.
+
+    Gathers session transcripts, related sessions, git history, and PR data
+    into a context directory with a session guide for interactive writing
+    in Claude Code.
+    """
+    from .debrief import prepare_debrief
+
+    cfg: Config = ctx.obj["config"]
+
+    if archive_dir:
+        cfg.archive_dir = archive_dir
+
+    if not cfg.db_path.exists():
+        click.echo("No archive database found. Run 'sync' first.")
+        return
+
+    db = Database(cfg.db_path)
+    with db:
+        try:
+            click.echo(f"Looking up session matching '{session_id}'...")
+            output_dir = prepare_debrief(
+                db=db,
+                cfg=cfg,
+                session_id_prefix=session_id,
+                archive_dir=archive_dir,
+            )
+            click.echo(f"\nContext prepared: {output_dir}/")
+            click.echo()
+            click.echo("Next steps:")
+            click.echo("  1. Open Claude Code")
+            click.echo(
+                f"  2. Read {output_dir / 'session-guide.md'}"
+            )
+        except ValueError as e:
+            click.echo(f"Error: {e}")
+
+
 def _run_recommendations(ctx, cfg: Config, synthesis_path: Path):
     """Generate actionable recommendations from a synthesis file."""
     from .analyzer.recommendations import (
