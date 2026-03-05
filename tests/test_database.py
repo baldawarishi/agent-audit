@@ -166,6 +166,166 @@ class TestDatabase:
         assert len(sessions) == 1
         assert sessions[0]["total_input_tokens"] == 999
 
+    def test_append_only_sync_preserves_old_messages(self, db):
+        """Test that re-inserting a session with different messages preserves all messages.
+
+        Simulates post-compaction sync: session originally had messages A, B, C.
+        After compaction, the JSONL has C and D. Re-sync should keep A, B, C and add D.
+        """
+        # First sync: messages A, B, C
+        session_v1 = Session(
+            id="append-session",
+            project="test-project",
+            cwd="/test",
+            started_at="2026-01-01T10:00:00Z",
+            ended_at="2026-01-01T11:00:00Z",
+            total_input_tokens=100,
+            total_output_tokens=50,
+            messages=[
+                Message(
+                    id="msg-A",
+                    session_id="append-session",
+                    type="user",
+                    timestamp="2026-01-01T10:00:00Z",
+                    content="Message A",
+                ),
+                Message(
+                    id="msg-B",
+                    session_id="append-session",
+                    type="assistant",
+                    timestamp="2026-01-01T10:00:01Z",
+                    content="Message B",
+                ),
+                Message(
+                    id="msg-C",
+                    session_id="append-session",
+                    type="user",
+                    timestamp="2026-01-01T10:00:02Z",
+                    content="Message C",
+                ),
+            ],
+            tool_calls=[
+                ToolCall(
+                    id="tc-1",
+                    message_id="msg-B",
+                    session_id="append-session",
+                    tool_name="Read",
+                    input_json="{}",
+                    timestamp="2026-01-01T10:00:01Z",
+                ),
+            ],
+            tool_results=[
+                ToolResult(
+                    id="tr-1",
+                    tool_call_id="tc-1",
+                    session_id="append-session",
+                    content="result 1",
+                    is_error=False,
+                    timestamp="2026-01-01T10:00:01Z",
+                ),
+            ],
+            commits=[
+                Commit(
+                    id="commit-1",
+                    session_id="append-session",
+                    commit_hash="aaa111",
+                    message="first commit",
+                    timestamp="2026-01-01T10:00:01Z",
+                ),
+            ],
+        )
+        db.insert_session(session_v1)
+
+        # Verify initial state
+        messages = db.get_messages_for_session("append-session")
+        assert len(messages) == 3
+
+        # Second sync: post-compaction, only C and new D
+        session_v2 = Session(
+            id="append-session",
+            project="test-project",
+            cwd="/test",
+            started_at="2026-01-01T10:00:00Z",
+            ended_at="2026-01-01T12:00:00Z",  # updated end time
+            total_input_tokens=200,  # updated token counts
+            total_output_tokens=100,
+            messages=[
+                Message(
+                    id="msg-C",
+                    session_id="append-session",
+                    type="user",
+                    timestamp="2026-01-01T10:00:02Z",
+                    content="Message C",
+                ),
+                Message(
+                    id="msg-D",
+                    session_id="append-session",
+                    type="assistant",
+                    timestamp="2026-01-01T11:30:00Z",
+                    content="Message D",
+                ),
+            ],
+            tool_calls=[
+                ToolCall(
+                    id="tc-2",
+                    message_id="msg-D",
+                    session_id="append-session",
+                    tool_name="Bash",
+                    input_json='{"command": "ls"}',
+                    timestamp="2026-01-01T11:30:00Z",
+                ),
+            ],
+            tool_results=[
+                ToolResult(
+                    id="tr-2",
+                    tool_call_id="tc-2",
+                    session_id="append-session",
+                    content="result 2",
+                    is_error=False,
+                    timestamp="2026-01-01T11:30:00Z",
+                ),
+            ],
+            commits=[
+                Commit(
+                    id="commit-2",
+                    session_id="append-session",
+                    commit_hash="bbb222",
+                    message="second commit",
+                    timestamp="2026-01-01T11:30:00Z",
+                ),
+            ],
+        )
+        db.insert_session(session_v2)
+
+        # Assert all 4 messages exist (A, B from first sync preserved; C not duplicated; D added)
+        messages = db.get_messages_for_session("append-session")
+        msg_ids = {m["id"] for m in messages}
+        assert msg_ids == {"msg-A", "msg-B", "msg-C", "msg-D"}
+        assert len(messages) == 4
+
+        # Assert all tool calls preserved + new one added
+        tool_calls = db.get_tool_calls_for_session("append-session")
+        tc_ids = {tc["id"] for tc in tool_calls}
+        assert tc_ids == {"tc-1", "tc-2"}
+
+        # Assert all tool results preserved + new one added
+        tool_results = db.get_tool_results_for_session("append-session")
+        tr_ids = {tr["id"] for tr in tool_results}
+        assert tr_ids == {"tr-1", "tr-2"}
+
+        # Assert all commits preserved + new one added
+        commits = db.get_commits_for_session("append-session")
+        commit_ids = {c["id"] for c in commits}
+        assert commit_ids == {"commit-1", "commit-2"}
+
+        # Assert session metadata reflects the SECOND insert (updated)
+        sessions = db.get_all_sessions()
+        assert len(sessions) == 1
+        session = sessions[0]
+        assert session["ended_at"] == "2026-01-01T12:00:00Z"
+        assert session["total_input_tokens"] == 200
+        assert session["total_output_tokens"] == 100
+
     def test_context_manager(self, sample_session):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = Path(f.name)

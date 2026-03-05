@@ -146,6 +146,7 @@ class Database:
         if self.conn is None:
             self.conn = sqlite3.connect(self.db_path)
             self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
             # 1. Create tables first
             self.conn.executescript(SCHEMA_TABLES)
             # 2. Run migrations to add new columns to existing tables
@@ -221,7 +222,7 @@ class Database:
         for message in session.messages:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO messages
+                INSERT OR IGNORE INTO messages
                 (id, session_id, parent_uuid, type, timestamp, content, thinking, model,
                  stop_reason, input_tokens, output_tokens, is_sidechain, is_compact_summary, has_images)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -248,7 +249,7 @@ class Database:
         for tool_call in session.tool_calls:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO tool_calls
+                INSERT OR IGNORE INTO tool_calls
                 (id, message_id, session_id, tool_name, input_json, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
@@ -266,7 +267,7 @@ class Database:
         for tool_result in session.tool_results:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO tool_results
+                INSERT OR IGNORE INTO tool_results
                 (id, tool_call_id, session_id, content, is_error, timestamp)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
@@ -284,7 +285,7 @@ class Database:
         for commit in session.commits:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO commits
+                INSERT OR IGNORE INTO commits
                 (id, session_id, commit_hash, message, timestamp)
                 VALUES (?, ?, ?, ?, ?)
                 """,

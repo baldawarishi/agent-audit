@@ -58,11 +58,6 @@ def main(ctx, config: Optional[Path]):
     help="Only sync sessions for a specific project",
 )
 @click.option(
-    "--force",
-    is_flag=True,
-    help="Re-archive sessions even if they already exist",
-)
-@click.option(
     "--include-tmp-directories",
     is_flag=True,
     help="Include sessions from temp directories (excluded by default)",
@@ -89,7 +84,6 @@ def sync(
     projects_dir: Optional[Path],
     archive_dir: Optional[Path],
     project: str,
-    force: bool,
     include_tmp_directories: bool,
     no_toml: bool,
     include_warmup: bool,
@@ -107,8 +101,6 @@ def sync(
     db = Database(cfg.db_path)
 
     with db:
-        existing_ids = set(db.get_session_ids()) if not force else set()
-
         synced = 0
         skipped = 0
         errors = 0
@@ -119,7 +111,7 @@ def sync(
         if source in ("all", "claude-code"):
             click.echo("=== Syncing Claude Code sessions ===")
             claude_synced, claude_skipped, claude_errors, claude_tmp, claude_warmup = _sync_claude_sessions(
-                db, cfg, existing_ids, project, include_tmp_directories, include_warmup, no_toml
+                db, cfg, project, include_tmp_directories, include_warmup, no_toml
             )
             synced += claude_synced
             skipped += claude_skipped
@@ -133,7 +125,7 @@ def sync(
             codex_home = get_codex_home()
             if codex_home.exists():
                 codex_synced, codex_skipped, codex_errors, codex_warmup = _sync_codex_sessions(
-                    db, cfg, existing_ids, project, include_warmup, no_toml
+                    db, cfg, project, include_warmup, no_toml
                 )
                 synced += codex_synced
                 skipped += codex_skipped
@@ -161,7 +153,6 @@ def sync(
 def _sync_claude_sessions(
     db: Database,
     cfg: Config,
-    existing_ids: set,
     project: Optional[str],
     include_tmp_directories: bool,
     include_warmup: bool,
@@ -185,14 +176,6 @@ def _sync_claude_sessions(
 
         # Filter by project if specified
         if project and proj_name != project:
-            continue
-
-        session_id = jsonl_file.stem
-        if session_id.startswith("agent-"):
-            session_id = session_id[6:]
-
-        if session_id in existing_ids:
-            skipped += 1
             continue
 
         try:
@@ -230,7 +213,6 @@ def _sync_claude_sessions(
 def _sync_codex_sessions(
     db: Database,
     cfg: Config,
-    existing_ids: set,
     project: Optional[str],
     include_warmup: bool,
     no_toml: bool,
@@ -244,14 +226,6 @@ def _sync_codex_sessions(
     for rollout_file, proj_name in discover_codex_sessions():
         # Filter by project if specified
         if project and proj_name != project:
-            continue
-
-        # Extract session ID from filename
-        from .codex_parser import get_session_id_from_filename
-        session_id = get_session_id_from_filename(rollout_file) or rollout_file.stem
-
-        if session_id in existing_ids:
-            skipped += 1
             continue
 
         try:

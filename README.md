@@ -14,7 +14,7 @@ uv sync
 ## Usage
 
 ```bash
-# Archive all sessions to SQLite (syncs both Claude Code and Codex by default)
+# Archive all sessions to SQLite (append-only — safe to run repeatedly)
 uv run agent-audit sync
 
 # Sync only one source
@@ -23,9 +23,6 @@ uv run agent-audit sync --source codex
 
 # Archive specific project
 uv run agent-audit sync --project my-project
-
-# Force re-archive existing sessions
-uv run agent-audit sync --force
 
 # Render sessions as TOML transcripts
 uv run agent-audit render
