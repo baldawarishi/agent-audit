@@ -492,6 +492,19 @@ def is_tmp_directory(dir_name: str) -> bool:
     return False
 
 
+def project_name_from_cwd(cwd: str) -> str:
+    """Derive a project name from a working directory path.
+
+    Converts a path like ``/Users/rishibaldawa/workspaces/ask-with-receipts``
+    into the same project name that Claude Code would produce, so that sessions
+    from different agents that share a workspace end up in the same folder.
+    """
+    # Encode the same way Claude Code encodes its project directories:
+    # /Users/rishi/workspaces/proj -> -Users-rishi-workspaces-proj
+    encoded = cwd.replace("/", "-")
+    return get_project_name_from_dir(encoded)
+
+
 def get_project_name_from_dir(dir_name: str) -> str:
     """Extract a readable project name from a project directory name.
 

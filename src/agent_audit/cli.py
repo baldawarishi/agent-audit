@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import logging
 
 from .config import Config
 from .database import Database
@@ -19,6 +20,21 @@ from .codex_parser import (
     parse_codex_session,
     get_codex_home,
 )
+from .pi_parser import (
+    discover_pi_sessions,
+    parse_pi_session,
+    get_pi_home,
+)
+from .opencode_parser import (
+    discover_opencode_sessions,
+    parse_opencode_session,
+    get_opencode_db,
+)
+from .goose_parser import (
+    discover_goose_sessions,
+    parse_goose_session,
+    get_goose_home,
+)
 from .toml_renderer import render_session_to_file as render_toml_file
 from .toml_renderer import render_session_toml
 
@@ -31,11 +47,19 @@ from .toml_renderer import render_session_toml
     default=None,
     help="Path to config file",
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Enable verbose logging",
+)
 @click.pass_context
-def main(ctx, config: Optional[Path]):
+def main(ctx, config: Optional[Path], verbose: bool):
     """Archive Claude Code transcripts for analysis."""
     ctx.ensure_object(dict)
     ctx.obj["config"] = Config.load(config)
+    
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
 
 @main.command()
@@ -74,7 +98,7 @@ def main(ctx, config: Optional[Path]):
 )
 @click.option(
     "--source",
-    type=click.Choice(["all", "claude-code", "codex"]),
+    type=click.Choice(["all", "claude-code", "codex", "pi", "opencode", "goose"]),
     default="all",
     help="Which agent source to sync (default: all)",
 )
@@ -133,6 +157,51 @@ def sync(
                 warmup_skipped += codex_warmup
             else:
                 click.echo(f"  Codex home not found: {codex_home}")
+
+        # Sync Pi sessions
+        if source in ("all", "pi"):
+            click.echo("\n=== Syncing Pi sessions ===")
+            pi_home = get_pi_home()
+            if pi_home.exists():
+                pi_synced, pi_skipped, pi_errors, pi_warmup = _sync_pi_sessions(
+                    db, cfg, project, include_warmup, no_toml
+                )
+                synced += pi_synced
+                skipped += pi_skipped
+                errors += pi_errors
+                warmup_skipped += pi_warmup
+            else:
+                click.echo(f"  Pi home not found: {pi_home}")
+
+        # Sync OpenCode sessions
+        if source in ("all", "opencode"):
+            click.echo("\n=== Syncing OpenCode sessions ===")
+            opencode_db = get_opencode_db()
+            if opencode_db.exists():
+                oc_synced, oc_skipped, oc_errors, oc_warmup = _sync_opencode_sessions(
+                    db, cfg, project, include_warmup, no_toml
+                )
+                synced += oc_synced
+                skipped += oc_skipped
+                errors += oc_errors
+                warmup_skipped += oc_warmup
+            else:
+                click.echo(f"  OpenCode database not found: {opencode_db}")
+
+        # Sync Goose sessions
+        if source in ("all", "goose"):
+            click.echo("\n=== Syncing Goose sessions ===")
+            goose_home = get_goose_home()
+            if goose_home.exists():
+                g_synced, g_skipped, g_errors, g_warmup = _sync_goose_sessions(
+                    db, cfg, project, include_warmup, no_toml
+                )
+                synced += g_synced
+                skipped += g_skipped
+                errors += g_errors
+                warmup_skipped += g_warmup
+            else:
+                click.echo(f"  Goose home not found: {goose_home}")
 
         click.echo(f"\nDone: {synced} synced, {skipped} skipped, {errors} errors")
         if tmp_skipped > 0:
@@ -248,6 +317,142 @@ def _sync_codex_sessions(
             db.insert_session(session)
 
             # Render TOML transcript unless --no-toml
+            if not no_toml:
+                render_toml_file(session, cfg.toml_dir)
+
+            click.echo(" done")
+            synced += 1
+        except Exception as e:
+            click.echo(f" ERROR: {e}")
+            errors += 1
+
+    return synced, skipped, errors, warmup_skipped
+
+
+def _sync_pi_sessions(
+    db: Database,
+    cfg: Config,
+    project: Optional[str],
+    include_warmup: bool,
+    no_toml: bool,
+) -> tuple[int, int, int, int]:
+    """Sync Pi sessions. Returns (synced, skipped, errors, warmup_skipped)."""
+    synced = 0
+    skipped = 0
+    errors = 0
+    warmup_skipped = 0
+
+    for jsonl_file, proj_name in discover_pi_sessions():
+        if project and proj_name != project:
+            continue
+
+        try:
+            click.echo(f"  Parsing {jsonl_file.name}...", nl=False)
+            session = parse_pi_session(jsonl_file, proj_name)
+
+            if not session.messages:
+                click.echo(" (empty, skipping)")
+                skipped += 1
+                continue
+
+            if not include_warmup and session.is_warmup:
+                click.echo(" (warmup, skipping)")
+                warmup_skipped += 1
+                continue
+
+            db.insert_session(session)
+
+            if not no_toml:
+                render_toml_file(session, cfg.toml_dir)
+
+            click.echo(" done")
+            synced += 1
+        except Exception as e:
+            click.echo(f" ERROR: {e}")
+            errors += 1
+
+    return synced, skipped, errors, warmup_skipped
+
+
+def _sync_opencode_sessions(
+    db: Database,
+    cfg: Config,
+    project: Optional[str],
+    include_warmup: bool,
+    no_toml: bool,
+) -> tuple[int, int, int, int]:
+    """Sync OpenCode sessions. Returns (synced, skipped, errors, warmup_skipped)."""
+    synced = 0
+    skipped = 0
+    errors = 0
+    warmup_skipped = 0
+
+    for session_id, proj_name in discover_opencode_sessions():
+        if project and proj_name != project:
+            continue
+
+        try:
+            click.echo(f"  Parsing {session_id}...", nl=False)
+            session = parse_opencode_session(session_id, proj_name)
+
+            if not session.messages:
+                click.echo(" (empty, skipping)")
+                skipped += 1
+                continue
+
+            if not include_warmup and session.is_warmup:
+                click.echo(" (warmup, skipping)")
+                warmup_skipped += 1
+                continue
+
+            db.insert_session(session)
+
+            if not no_toml:
+                render_toml_file(session, cfg.toml_dir)
+
+            click.echo(" done")
+            synced += 1
+        except Exception as e:
+            click.echo(f" ERROR: {e}")
+            errors += 1
+
+    return synced, skipped, errors, warmup_skipped
+
+
+def _sync_goose_sessions(
+    db: Database,
+    cfg: Config,
+    project: Optional[str],
+    include_warmup: bool,
+    no_toml: bool,
+) -> tuple[int, int, int, int]:
+    """Sync Goose sessions. Returns (synced, skipped, errors, warmup_skipped)."""
+    synced = 0
+    skipped = 0
+    errors = 0
+    warmup_skipped = 0
+
+    for session_identifier, proj_name in discover_goose_sessions():
+        if project and proj_name != project:
+            continue
+
+        try:
+            display_name = session_identifier.split(":")[-1] if ":" in session_identifier else Path(session_identifier).name
+            click.echo(f"  Parsing {display_name}...", nl=False)
+            session = parse_goose_session(session_identifier, proj_name)
+
+            if not session.messages:
+                click.echo(" (empty, skipping)")
+                skipped += 1
+                continue
+
+            if not include_warmup and session.is_warmup:
+                click.echo(" (warmup, skipping)")
+                warmup_skipped += 1
+                continue
+
+            db.insert_session(session)
+
             if not no_toml:
                 render_toml_file(session, cfg.toml_dir)
 
