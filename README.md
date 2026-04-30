@@ -20,6 +20,10 @@ uv run agent-audit sync
 # Sync only one source
 uv run agent-audit sync --source claude-code
 uv run agent-audit sync --source codex
+uv run agent-audit sync --source pi
+uv run agent-audit sync --source opencode
+uv run agent-audit sync --source goose
+uv run agent-audit sync --source gemini-cli
 
 # Archive specific project
 uv run agent-audit sync --project my-project
@@ -81,3 +85,7 @@ Settings are stored in `~/.config/agent-audit/config.json`:
 Session sources:
 - **Claude Code**: `~/.claude/projects/`
 - **Codex CLI**: `~/.codex/sessions/` (or `$CODEX_HOME/sessions/`)
+- **Pi**: `~/.pi/agent/sessions/`
+- **OpenCode**: `~/.local/share/opencode/opencode.db`
+- **Goose**: `~/.local/share/goose/sessions/`
+- **Gemini CLI**: `~/.gemini/tmp/<project>/chats/`
