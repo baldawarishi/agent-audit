@@ -35,6 +35,11 @@ from .goose_parser import (
     parse_goose_session,
     get_goose_home,
 )
+from .gemini_parser import (
+    discover_gemini_sessions,
+    parse_gemini_session,
+    get_gemini_home,
+)
 from .toml_renderer import render_session_to_file as render_toml_file
 from .toml_renderer import render_session_toml
 
@@ -98,7 +103,7 @@ def main(ctx, config: Optional[Path], verbose: bool):
 )
 @click.option(
     "--source",
-    type=click.Choice(["all", "claude-code", "codex", "pi", "opencode", "goose"]),
+    type=click.Choice(["all", "claude-code", "codex", "pi", "opencode", "goose", "gemini-cli"]),
     default="all",
     help="Which agent source to sync (default: all)",
 )
@@ -202,6 +207,21 @@ def sync(
                 warmup_skipped += g_warmup
             else:
                 click.echo(f"  Goose home not found: {goose_home}")
+
+        # Sync Gemini CLI sessions
+        if source in ("all", "gemini-cli"):
+            click.echo("\n=== Syncing Gemini CLI sessions ===")
+            gemini_home = get_gemini_home()
+            if gemini_home.exists():
+                gem_synced, gem_skipped, gem_errors, gem_warmup = _sync_gemini_sessions(
+                    db, cfg, project, include_warmup, no_toml
+                )
+                synced += gem_synced
+                skipped += gem_skipped
+                errors += gem_errors
+                warmup_skipped += gem_warmup
+            else:
+                click.echo(f"  Gemini CLI home not found: {gemini_home}")
 
         click.echo(f"\nDone: {synced} synced, {skipped} skipped, {errors} errors")
         if tmp_skipped > 0:
@@ -440,6 +460,51 @@ def _sync_goose_sessions(
             display_name = session_identifier.split(":")[-1] if ":" in session_identifier else Path(session_identifier).name
             click.echo(f"  Parsing {display_name}...", nl=False)
             session = parse_goose_session(session_identifier, proj_name)
+
+            if not session.messages:
+                click.echo(" (empty, skipping)")
+                skipped += 1
+                continue
+
+            if not include_warmup and session.is_warmup:
+                click.echo(" (warmup, skipping)")
+                warmup_skipped += 1
+                continue
+
+            db.insert_session(session)
+
+            if not no_toml:
+                render_toml_file(session, cfg.toml_dir)
+
+            click.echo(" done")
+            synced += 1
+        except Exception as e:
+            click.echo(f" ERROR: {e}")
+            errors += 1
+
+    return synced, skipped, errors, warmup_skipped
+
+
+def _sync_gemini_sessions(
+    db: Database,
+    cfg: Config,
+    project: Optional[str],
+    include_warmup: bool,
+    no_toml: bool,
+) -> tuple[int, int, int, int]:
+    """Sync Gemini CLI sessions. Returns (synced, skipped, errors, warmup_skipped)."""
+    synced = 0
+    skipped = 0
+    errors = 0
+    warmup_skipped = 0
+
+    for json_file, proj_name in discover_gemini_sessions():
+        if project and proj_name != project:
+            continue
+
+        try:
+            click.echo(f"  Parsing {json_file.name}...", nl=False)
+            session = parse_gemini_session(json_file, proj_name)
 
             if not session.messages:
                 click.echo(" (empty, skipping)")
