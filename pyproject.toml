@@ -14,7 +14,9 @@ agent-audit = "agent_audit.cli:main"
 
 [tool.uv]
 package = true
-dev-dependencies = [
+
+[dependency-groups]
+dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.21.0",
     "mypy>=1.0",
