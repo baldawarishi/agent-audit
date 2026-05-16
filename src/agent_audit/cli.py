@@ -10,7 +10,12 @@ import logging
 
 from .config import Config
 from .database import Database
-from .mining import format_churn_table, get_query, list_queries
+from .mining import (
+    format_churn_table,
+    format_failures_table,
+    get_query,
+    list_queries,
+)
 from .parser import (
     discover_sessions as discover_claude_sessions,
     get_project_name_from_dir,
@@ -1299,6 +1304,53 @@ def mine_churn(
         result = get_query("churn")(db, gap=gap)
 
     click.echo(format_churn_table(result, top))
+
+    if json_path:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(result, indent=2))
+        click.echo(f"Wrote {json_path}")
+
+
+@mine.command("failures")
+@click.option(
+    "--db",
+    "db_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to sessions.db (default: the archive database).",
+)
+@click.option(
+    "--examples",
+    default=1,
+    show_default=True,
+    help="Error-content snippets to keep per bucket.",
+)
+@click.option(
+    "--write-json",
+    "json_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Also write the full {name,meta,rows} envelope to this path as JSON.",
+)
+@click.pass_context
+def mine_failures(
+    ctx,
+    db_path: Optional[Path],
+    examples: int,
+    json_path: Optional[Path],
+):
+    """Bucket error tool-results by failure kind (02_failure_classification)."""
+    cfg: Config = ctx.obj["config"]
+    db_path = db_path or cfg.db_path
+
+    if not db_path.exists():
+        click.echo("No archive database found. Run 'sync' first.")
+        return
+
+    with Database(db_path) as db:
+        result = get_query("failures")(db, examples=examples)
+
+    click.echo(format_failures_table(result))
 
     if json_path:
         json_path.parent.mkdir(parents=True, exist_ok=True)

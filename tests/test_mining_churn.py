@@ -270,7 +270,7 @@ def test_mine_cli_list_and_churn(tmp_path):
 
     res = runner.invoke(main, ["mine", "list"])
     assert res.exit_code == 0, res.output
-    assert res.output.strip() == "churn"
+    assert res.output.split() == ["churn", "failures"]
 
     json_out = tmp_path / "out" / "01_churn.json"
     res = runner.invoke(

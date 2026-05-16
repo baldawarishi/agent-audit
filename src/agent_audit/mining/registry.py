@@ -10,9 +10,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .churn import churn_query
+from .failures import failures_query
 
 REGISTRY: dict[str, Callable[..., dict]] = {
     "churn": churn_query,
+    "failures": failures_query,
 }
 
 
