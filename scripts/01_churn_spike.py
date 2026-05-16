@@ -1,105 +1,24 @@
-"""Read-only churn-score spike (Step 1).
+"""Step-1 churn spike — now a thin shim over ``agent_audit.mining.churn``.
 
-Throwaway standalone script to validate the churn premise on a real
-archive/sessions.db before building any mining framework. No writes,
-no JSON output, no new dependencies.
-
-    churn = sequences * (1 + fail_count / total_calls)
-
-where a "sequence" is a maximal run of tool calls whose consecutive
-timestamps are within --gap seconds of each other (gap logic mirrors
-debrief._build_timeline_summary). Run:
+The pure logic moved into the package (Step 2); this script is kept
+only as a regression guard so the Step-1 demo command still runs and
+prints identically:
 
     uv run python scripts/01_churn_spike.py [--db PATH] [--gap 120] [--top 20]
+
+The real ``mine`` CLI command (Step 3) supersedes this script.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import click
 
 from agent_audit.database import Database
+from agent_audit.mining.churn import churn_query
 
 DEFAULT_DB = Path(__file__).resolve().parent.parent / "archive" / "sessions.db"
-
-
-def parse_ts(ts: str | None) -> datetime | None:
-    """Parse an ISO timestamp; return None for missing/unparseable input."""
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-
-
-def count_sequences(calls: list[dict], gap_seconds: float) -> int:
-    """Count maximal runs of tool calls within ``gap_seconds`` of each other.
-
-    A missing/unparseable timestamp on either side of a pair is treated as
-    a gap break (start a new sequence) rather than crashing.
-    """
-    if not calls:
-        return 0
-    sequences = 1
-    prev_dt = parse_ts(calls[0].get("timestamp"))
-    for call in calls[1:]:
-        curr_dt = parse_ts(call.get("timestamp"))
-        if prev_dt is None or curr_dt is None:
-            sequences += 1
-        elif (curr_dt - prev_dt).total_seconds() > gap_seconds:
-            sequences += 1
-        prev_dt = curr_dt
-    return sequences
-
-
-def fail_count(calls: list[dict], results: list[dict]) -> int:
-    """Count tool calls in this session whose result is flagged is_error.
-
-    A call with no matching result is not a failure.
-    """
-    call_ids = {c["id"] for c in calls}
-    failing = {
-        r.get("tool_call_id")
-        for r in results
-        if r.get("is_error") and r.get("tool_call_id") in call_ids
-    }
-    return len(failing)
-
-
-def median(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    s = sorted(values)
-    n = len(s)
-    mid = n // 2
-    if n % 2:
-        return float(s[mid])
-    return (s[mid - 1] + s[mid]) / 2
-
-
-def score_session(session: dict, db: Database, gap_seconds: float) -> dict | None:
-    """Compute churn for one session, or None if it has no tool calls."""
-    sid = session["id"]
-    calls = db.get_tool_calls_for_session(sid)
-    total = len(calls)
-    if total == 0:
-        return None
-    results = db.get_tool_results_for_session(sid)
-    sequences = count_sequences(calls, gap_seconds)
-    fails = fail_count(calls, results)
-    fail_ratio = fails / total
-    return {
-        "session_id": sid,
-        "project": session.get("project") or "",
-        "total": total,
-        "sequences": sequences,
-        "fail_count": fails,
-        "fail_ratio": fail_ratio,
-        "churn": sequences * (1 + fail_ratio),
-    }
 
 
 @click.command()
@@ -113,21 +32,16 @@ def main(db_path: Path, gap: float, top: int) -> None:
     if not db_path.exists():
         raise click.ClickException(f"Database not found: {db_path}")
 
-    rows: list[dict] = []
     with Database(db_path) as db:
-        sessions = db.get_all_sessions()
-        for session in sessions:
-            row = score_session(session, db, gap)
-            if row is not None:
-                rows.append(row)
+        result = churn_query(db, gap=gap)
 
-    scanned = len(sessions)
-    with_calls = len(rows)
+    meta = result["meta"]
+    rows = result["rows"]
     if not rows:
-        click.echo(f"Scanned {scanned} sessions; none had tool calls.")
+        click.echo(
+            f"Scanned {meta['sessions_scanned']} sessions; none had tool calls."
+        )
         return
-
-    rows.sort(key=lambda r: r["churn"], reverse=True)
 
     header = (
         f"{'session':8}  {'project':30}  {'total':>5}  {'seqs':>5}  "
@@ -144,8 +58,9 @@ def main(db_path: Path, gap: float, top: int) -> None:
 
     click.echo("-" * len(header))
     click.echo(
-        f"sessions scanned: {scanned}  |  with tool calls: {with_calls}  |  "
-        f"median churn: {median([r['churn'] for r in rows]):.2f}"
+        f"sessions scanned: {meta['sessions_scanned']}  |  "
+        f"with tool calls: {meta['sessions_with_calls']}  |  "
+        f"median churn: {meta['median_churn']:.2f}"
     )
 
 
