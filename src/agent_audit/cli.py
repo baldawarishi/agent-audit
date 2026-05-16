@@ -1,5 +1,6 @@
 """CLI for Agent Audit."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -9,6 +10,7 @@ import logging
 
 from .config import Config
 from .database import Database
+from .mining import format_churn_table, get_query, list_queries
 from .parser import (
     discover_sessions as discover_claude_sessions,
     get_project_name_from_dir,
@@ -1237,6 +1239,71 @@ def debrief(ctx, session_id: str, archive_dir: Optional[Path]):
             )
         except ValueError as e:
             click.echo(f"Error: {e}")
+
+
+@main.group("mine")
+def mine():
+    """Deterministic transcript-mining queries."""
+
+
+@mine.command("list")
+def mine_list():
+    """List the registered mining queries."""
+    click.echo("\n".join(list_queries()))
+
+
+@mine.command("churn")
+@click.option(
+    "--db",
+    "db_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to sessions.db (default: the archive database).",
+)
+@click.option(
+    "--gap",
+    default=120.0,
+    show_default=True,
+    help="Max seconds between calls to stay in the same sequence.",
+)
+@click.option(
+    "--top",
+    default=20,
+    show_default=True,
+    help="How many of the churniest sessions to print.",
+)
+@click.option(
+    "--write-json",
+    "json_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Also write the full {name,meta,rows} envelope to this path as JSON.",
+)
+@click.pass_context
+def mine_churn(
+    ctx,
+    db_path: Optional[Path],
+    gap: float,
+    top: int,
+    json_path: Optional[Path],
+):
+    """Rank sessions by tool-call churn (01_churn)."""
+    cfg: Config = ctx.obj["config"]
+    db_path = db_path or cfg.db_path
+
+    if not db_path.exists():
+        click.echo("No archive database found. Run 'sync' first.")
+        return
+
+    with Database(db_path) as db:
+        result = get_query("churn")(db, gap=gap)
+
+    click.echo(format_churn_table(result, top))
+
+    if json_path:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(result, indent=2))
+        click.echo(f"Wrote {json_path}")
 
 
 def _run_recommendations(ctx, cfg: Config, synthesis_path: Path):

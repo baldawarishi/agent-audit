@@ -52,6 +52,18 @@ uv run agent-audit analyze --recommend archive/analysis/run-YYYYMMDD-HHMMSS/glob
 # Prepare debrief context for a session
 uv run agent-audit debrief --session abc123
 
+# List available deterministic transcript-mining queries
+uv run agent-audit mine list
+
+# Rank sessions by tool-call churn — sequences x (1 + failure ratio).
+# Read-only over archive/sessions.db; no LLM. Prints the top N worst sessions.
+uv run agent-audit mine churn --top 20
+
+# Same, but ALSO persist the full result set (every scored session + meta)
+# as JSON so you can diff churn before/after a fix. Plain `mine churn`
+# writes nothing; the file is created only because --write-json is passed.
+uv run agent-audit mine churn --write-json results/01_churn.json
+
 # Configure archive/projects directories
 uv run agent-audit config --archive-dir /path/to/archive
 uv run agent-audit config --show
@@ -70,6 +82,8 @@ uv run agent-audit config --show
   - `session-guide.md` - Interactive session guide for Claude Code
   - `context/` - Gathered context (transcripts, git log, PRs, metrics)
   - `drafts/` - Draft output directory
+- `results/{query}.json` - Saved mining-query results, written only when
+  `mine ... --write-json PATH` is passed (regenerable artifact; git-ignored)
 
 ## Configuration
 

@@ -1,7 +1,7 @@
 """Churn-score query (mined finding ``01_churn``).
 
 The pure functions below are ported **verbatim** from the Step-1 spike
-(``scripts/01_churn_spike.py``); their logic is unchanged. The churn
+(commit ``3a3051a``); their logic is unchanged. The churn
 formula is kept exactly as the reference article defines it — the
 fragmentation / ``quamin`` skew is a finding to interpret downstream,
 not a license to reweight here.

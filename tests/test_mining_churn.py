@@ -1,12 +1,13 @@
 """Tests for the mining churn query (agent_audit.mining.churn)."""
 
+import json
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from agent_audit.database import Database
-from agent_audit.mining import churn, get_query, list_queries
+from agent_audit.mining import churn, format_churn_table, get_query, list_queries
 from agent_audit.mining.churn import churn_query
 from agent_audit.models import Message, Session, ToolCall, ToolResult
 
@@ -190,3 +191,113 @@ def test_registry():
     assert get_query("churn") is churn_query
     with pytest.raises(KeyError):
         get_query("nope")
+
+
+def test_format_churn_table_known_envelope():
+    """Pinned regression contract for the Step-1 table (shim is gone)."""
+    result = {
+        "name": "01_churn",
+        "meta": {
+            "gap": 120.0,
+            "sessions_scanned": 3,
+            "sessions_with_calls": 1,
+            "median_churn": 2.5,
+        },
+        "rows": [
+            {
+                "session_id": "abcd1234ef",
+                "project": "demo-project",
+                "total": 4,
+                "sequences": 2,
+                "fail_count": 1,
+                "fail_ratio": 0.25,
+                "churn": 2.5,
+            }
+        ],
+    }
+    out = format_churn_table(result, top=20)
+    lines = out.splitlines()
+    assert lines[0].startswith("session")
+    assert "churn" in lines[0]
+    # session id truncated to 8 chars; churn right-aligned to 2dp.
+    assert "abcd1234" in out
+    assert " 25.0%" in out
+    assert "    2.50" in out
+    assert (
+        lines[-1]
+        == "sessions scanned: 3  |  with tool calls: 1  |  median churn: 2.50"
+    )
+
+
+def test_format_churn_table_empty_rows():
+    result = {
+        "name": "01_churn",
+        "meta": {
+            "gap": 120.0,
+            "sessions_scanned": 5,
+            "sessions_with_calls": 0,
+            "median_churn": 0.0,
+        },
+        "rows": [],
+    }
+    assert (
+        format_churn_table(result, 20)
+        == "Scanned 5 sessions; none had tool calls."
+    )
+
+
+def test_mine_cli_list_and_churn(tmp_path):
+    """`mine list` + `mine churn --db <tmp> --json <tmp>` end to end."""
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    db_path = tmp_path / "sessions.db"
+    database = Database(db_path)
+    database.connect()
+    # high churn: 4 calls, 2 sequences, 1 failure -> 2 * (1 + 1/4) = 2.5
+    _insert_session(database, "hi", "p-hi", [
+        "2026-01-01T10:00:00Z",
+        "2026-01-01T10:01:00Z",
+        "2026-01-01T10:05:00Z",
+        "2026-01-01T10:05:30Z",
+    ], fail_ids=(2,))
+    # low churn: 1 call, 1 sequence, 0 failures -> 1.0
+    _insert_session(database, "lo", "p-lo", ["2026-01-01T10:00:00Z"])
+    database.close()
+
+    runner = CliRunner()
+
+    res = runner.invoke(main, ["mine", "list"])
+    assert res.exit_code == 0, res.output
+    assert res.output.strip() == "churn"
+
+    json_out = tmp_path / "out" / "01_churn.json"
+    res = runner.invoke(
+        main,
+        ["mine", "churn", "--db", str(db_path), "--top", "20",
+         "--write-json", str(json_out)],
+    )
+    assert res.exit_code == 0, res.output
+    assert "median churn:" in res.output
+    assert "hi" in res.output
+    assert f"Wrote {json_out}" in res.output
+
+    data = json.loads(json_out.read_text())
+    assert data["name"] == "01_churn"
+    churns = [r["churn"] for r in data["rows"]]
+    assert churns == sorted(churns, reverse=True)
+    assert data["rows"][0]["session_id"] == "hi"
+    assert data["rows"][0]["churn"] == pytest.approx(2.5)
+
+
+def test_mine_churn_missing_db(tmp_path):
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    res = CliRunner().invoke(
+        main, ["mine", "churn", "--db", str(tmp_path / "nope.db")]
+    )
+    assert res.exit_code == 0
+    assert "No archive database found" in res.output
