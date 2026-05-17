@@ -834,7 +834,7 @@ def analyze(
 def _run_session_analysis(ctx, cfg: Config):
     """Run per-project session analysis."""
     import asyncio
-    from .analyzer.session_analyzer import SessionAnalyzer
+    from .analyzer.session_analyzer import SessionAnalyzer, load_mined_findings
     from .analyzer.claude_client import AnalyzerClaudeClient
 
     db = Database(cfg.db_path)
@@ -842,6 +842,14 @@ def _run_session_analysis(ctx, cfg: Config):
     # Get all projects from database
     with db:
         projects = db.get_stats()["projects"]
+
+    # Grounding is mandatory: load the deterministic miner envelopes up front
+    # so a missing one aborts the whole run loudly, before any project is
+    # analyzed (no per-project soft skip, no ungrounded fallback).
+    try:
+        mined_findings = load_mined_findings(Path("results"))
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))
 
     # Create run directory with timestamp
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -875,7 +883,9 @@ def _run_session_analysis(ctx, cfg: Config):
                     )
 
                     try:
-                        result = await analyzer.analyze_project(project)
+                        result = await analyzer.analyze_project(
+                            project, mined_findings
+                        )
 
                         # Write output
                         output_path = run_dir / f"{project}.md"

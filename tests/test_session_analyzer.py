@@ -1,5 +1,6 @@
 """Tests for session analyzer module."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,10 +9,40 @@ import pytest
 from agent_audit.analyzer.session_analyzer import (
     SessionAnalyzer,
     build_session_analysis_prompt,
+    load_mined_findings,
     load_session_analysis_template,
     build_global_synthesis_prompt,
     load_global_synthesis_template,
 )
+
+
+def _write_envelope(
+    results_dir: Path, nn: str, slug: str, meta: dict, rows: list[dict]
+) -> None:
+    """Write a minimal {name, meta, rows} envelope as results/NN_slug.json."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / f"{nn}_{slug}.json").write_text(
+        json.dumps({"name": f"{nn}_{slug}", "meta": meta, "rows": rows})
+    )
+
+
+def _write_all_five(results_dir: Path, rows_for_01: list[dict] | None = None) -> None:
+    """Populate results_dir with all five mandatory envelopes."""
+    _write_envelope(
+        results_dir, "01", "churn", {"sessions": 3}, rows_for_01 or [{"sid": "a"}]
+    )
+    _write_envelope(results_dir, "02", "failure_classification", {"total": 9}, [
+        {"bucket": "other", "count": 7}
+    ])
+    _write_envelope(results_dir, "03", "bash_subcommands", {"calls": 5}, [
+        {"sub": "git", "count": 3}
+    ])
+    _write_envelope(results_dir, "04", "tool_sequences", {"trigrams": 4}, [
+        {"seq": "Bash->Bash->Bash", "count": 4}
+    ])
+    _write_envelope(results_dir, "05", "bash_sequences", {"trigrams": 2}, [
+        {"seq": "bash:git->bash:git->bash:git", "count": 2}
+    ])
 
 
 class TestLoadSessionAnalysisTemplate:
@@ -43,6 +74,8 @@ class TestLoadSessionAnalysisTemplate:
         assert "{project_min_msgs}" in template
         assert "{project_max_msgs}" in template
         assert "{project_avg_tokens" in template
+        # Deterministic mined-findings grounding block
+        assert "{mined_findings}" in template
 
     def test_template_has_critical_framing(self):
         """Template uses critical/skeptical framing, not positive."""
@@ -85,7 +118,11 @@ class TestBuildSessionAnalysisPrompt:
             project_min_msgs=10,
             project_max_msgs=300,
             project_avg_tokens=30000,
+            mined_findings="MINED_EVIDENCE_BLOCK",
         )
+
+        # Mined findings grounding block is injected verbatim
+        assert "MINED_EVIDENCE_BLOCK" in prompt
 
         # Basic project info
         assert "test-project" in prompt
@@ -161,7 +198,7 @@ class TestSessionAnalyzer:
             toml_dir=Path("/fake/toml"),
         )
 
-        result = await analyzer.analyze_project("my-project")
+        result = await analyzer.analyze_project("my-project", "MINED_FOR_MY_PROJECT")
 
         # Verify database was queried for all metrics
         mock_db.get_project_metrics.assert_called_once_with("my-project")
@@ -173,6 +210,7 @@ class TestSessionAnalyzer:
         prompt_arg = mock_client.query.call_args[0][0]
         assert "my-project" in prompt_arg
         assert "/fake/toml/my-project" in prompt_arg
+        assert "MINED_FOR_MY_PROJECT" in prompt_arg
         # Check that global percentiles appear in prompt
         assert "126" in prompt_arg  # p50_msgs
         assert "251" in prompt_arg  # p75_msgs
@@ -205,7 +243,7 @@ class TestSessionAnalyzer:
             toml_dir=Path("/fake/toml"),
         )
 
-        await analyzer.analyze_project("empty-project")
+        await analyzer.analyze_project("empty-project", "MINED_EMPTY")
 
         # Should still call Claude even with empty project
         mock_client.query.assert_called_once()
@@ -362,3 +400,58 @@ class TestSessionAnalyzerGlobalSynthesis:
 
         with pytest.raises(ValueError, match="No analysis files found"):
             await analyzer.synthesize_global(analysis_dir)
+
+
+class TestLoadMinedFindings:
+    """Tests for load_mined_findings (hard-fail, no soft-degrade)."""
+
+    def test_all_five_present_renders_compact_blocks(self, tmp_path):
+        """All envelopes present -> one ### block each with meta + rows."""
+        results = tmp_path / "results"
+        _write_all_five(results)
+
+        out = load_mined_findings(results)
+
+        for name in (
+            "01_churn",
+            "02_failure_classification",
+            "03_bash_subcommands",
+            "04_tool_sequences",
+            "05_bash_sequences",
+        ):
+            assert f"### {name}" in out
+        # meta + a representative row cell are rendered
+        assert "meta: sessions=3" in out
+        assert "bucket=other" in out
+        assert "seq=bash:git->bash:git->bash:git" in out
+
+    def test_top_n_truncates_and_never_dumps_full_rows(self, tmp_path):
+        """Only `top` rows are rendered; the tail is dropped, not dumped."""
+        results = tmp_path / "results"
+        big = [{"marker": f"row{i}"} for i in range(20)]
+        _write_all_five(results, rows_for_01=big)
+
+        out = load_mined_findings(results, top=15)
+
+        assert "rows (top 15 of 20):" in out
+        assert "marker=row14" in out  # 15th row (0-indexed) is included
+        assert "marker=row15" not in out  # 16th row is NOT dumped
+        assert "marker=row19" not in out
+
+    def test_missing_one_envelope_hard_fails(self, tmp_path):
+        """Omitting a single stage raises, naming the stage + its command."""
+        results = tmp_path / "results"
+        _write_all_five(results)
+        (results / "03_bash_subcommands.json").unlink()
+
+        with pytest.raises(FileNotFoundError) as exc:
+            load_mined_findings(results)
+        msg = str(exc.value)
+        assert "stages 03" in msg
+        assert "mine bash --write-json results/03_bash_subcommands.json" in msg
+
+    def test_missing_dir_hard_fails_listing_all_stages(self, tmp_path):
+        """Absent results dir raises, listing every missing stage."""
+        with pytest.raises(FileNotFoundError) as exc:
+            load_mined_findings(tmp_path / "does-not-exist")
+        assert "stages 01, 02, 03, 04, 05" in str(exc.value)

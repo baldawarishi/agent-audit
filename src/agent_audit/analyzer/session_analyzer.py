@@ -1,7 +1,20 @@
 """Session analyzer for per-project analysis using Claude."""
 
+import json
 from pathlib import Path
 from typing import Protocol
+
+# Deterministic miner envelopes the analysis is grounded in, keyed by the
+# NN stage prefix -> the command that regenerates that envelope. All five are
+# mandatory: a missing one hard-fails (no soft-degrade — explicit user steer
+# 2026-05-17, overriding the plan's prior soft-degrade Invariant).
+_REQUIRED_MINED = {
+    "01": "agent-audit mine churn --write-json results/01_churn.json",
+    "02": "agent-audit mine failures --write-json results/02_failure_classification.json",
+    "03": "agent-audit mine bash --write-json results/03_bash_subcommands.json",
+    "04": "agent-audit mine sequences --write-json results/04_tool_sequences.json",
+    "05": "agent-audit mine bash-sequences --write-json results/05_bash_sequences.json",
+}
 
 
 class ClaudeClient(Protocol):
@@ -58,6 +71,67 @@ def load_best_practices_reference() -> str:
         Path(__file__).parent.parent / "prompts" / "best_practices_reference.md"
     )
     return template_path.read_text()
+
+
+def _fmt_value(value: object) -> str:
+    """Render one envelope cell as a compact single-line string."""
+    if isinstance(value, list):
+        head = "; ".join(str(x) for x in value[:3])
+        if len(value) > 3:
+            head += f"; …(+{len(value) - 3})"
+        return f"[{head}]"
+    flat = " ".join(str(value).split())
+    return flat if len(flat) <= 160 else flat[:157] + "…"
+
+
+def load_mined_findings(results_dir: Path = Path("results"), top: int = 15) -> str:
+    """Render the deterministic miner envelopes as a plain-text evidence block.
+
+    Hard-fails (raises ``FileNotFoundError``) if ``results_dir`` is absent or
+    any of the five mandatory ``NN_*.json`` envelopes (01-05) is missing —
+    there is no soft-degrade / sentinel fallback (explicit user steer
+    2026-05-17). The error names every missing stage and the exact
+    ``agent-audit mine … --write-json`` command that regenerates it.
+
+    Args:
+        results_dir: Directory holding the ``mine --write-json`` envelopes
+            (CWD-relative ``results/`` by convention — Config has no results
+            dir; ``mine --write-json`` takes a raw path).
+        top: Max rows rendered per query (meta + name always shown in full).
+
+    Returns:
+        A plain-text block (no ``click``) with one ``### NN_name`` section per
+        query: a ``meta:`` k=v line then up to ``top`` rows.
+    """
+    found: dict[str, Path] = {}
+    if results_dir.is_dir():
+        for path in results_dir.glob("0[1-5]_*.json"):
+            found.setdefault(path.name[:2], path)
+
+    missing = sorted(set(_REQUIRED_MINED) - set(found))
+    if missing:
+        lines = [
+            f"Missing deterministic miner output in {results_dir}/ "
+            f"(stages {', '.join(missing)}). "
+            "Grounding is mandatory — regenerate the missing envelope(s):",
+        ]
+        lines += [f"  $ {_REQUIRED_MINED[nn]}" for nn in missing]
+        raise FileNotFoundError("\n".join(lines))
+
+    blocks: list[str] = []
+    for nn in sorted(found):
+        envelope = json.loads(found[nn].read_text())
+        name = envelope.get("name", found[nn].stem)
+        meta = envelope.get("meta", {})
+        rows = envelope.get("rows", [])
+        meta_line = ", ".join(f"{k}={_fmt_value(v)}" for k, v in meta.items())
+        block = [f"### {name}", f"meta: {meta_line or '(none)'}"]
+        block.append(f"rows (top {top} of {len(rows)}):")
+        for i, row in enumerate(rows[:top], 1):
+            cells = " | ".join(f"{k}={_fmt_value(v)}" for k, v in row.items())
+            block.append(f"  {i}. {cells}")
+        blocks.append("\n".join(block))
+    return "\n\n".join(blocks)
 
 
 def load_validation_template() -> str:
@@ -157,6 +231,7 @@ def build_session_analysis_prompt(
     project_min_msgs: int,
     project_max_msgs: int,
     project_avg_tokens: int,
+    mined_findings: str,
 ) -> str:
     """Build the session analysis prompt with metrics.
 
@@ -176,6 +251,7 @@ def build_session_analysis_prompt(
         project_min_msgs: Project minimum message count
         project_max_msgs: Project maximum message count
         project_avg_tokens: Project average output tokens
+        mined_findings: Rendered deterministic miner evidence block
 
     Returns:
         Formatted prompt string.
@@ -198,6 +274,7 @@ def build_session_analysis_prompt(
         project_min_msgs=project_min_msgs,
         project_max_msgs=project_max_msgs,
         project_avg_tokens=project_avg_tokens,
+        mined_findings=mined_findings,
     )
 
 
@@ -225,11 +302,14 @@ class SessionAnalyzer:
         self.db = db
         self.toml_dir = toml_dir
 
-    async def analyze_project(self, project: str) -> str:
+    async def analyze_project(self, project: str, mined_findings: str) -> str:
         """Analyze sessions for a single project.
 
         Args:
             project: Project name to analyze
+            mined_findings: Rendered deterministic miner evidence block
+                (see :func:`load_mined_findings`), shared across all projects
+                in a run.
 
         Returns:
             Markdown analysis content.
@@ -259,6 +339,7 @@ class SessionAnalyzer:
             project_min_msgs=project_stats["min_msgs"],
             project_max_msgs=project_stats["max_msgs"],
             project_avg_tokens=project_stats["avg_tokens"],
+            mined_findings=mined_findings,
         )
 
         # Query Claude and return the response

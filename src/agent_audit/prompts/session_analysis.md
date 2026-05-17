@@ -18,6 +18,14 @@ You are a **skeptical auditor** analyzing Claude Code sessions for the **{projec
 
 **Session Transcripts:** `{toml_dir}`
 
+## Deterministic Mined Findings
+
+The block below holds **deterministic, fleet-wide measurements** computed by the miner over the entire session archive (every project, not just this one). Treat these numbers as the **primary signal**: ground every rating, problem, and improvement suggestion in them and **cite the specific query name + row** you used (e.g. "`02_failure_classification`: 78.6% of failures are bucket `other` = bash `Exit code 1`").
+
+The TOML transcripts are **corroboration only** — use them to explain *why* a mined number looks the way it does, never to re-derive what the miner already counted exactly. If a transcript impression contradicts a mined number, trust the mined number and explicitly flag the discrepancy.
+
+{mined_findings}
+
 ## Session Quality Definitions
 
 | Quality | Definition | Evidence Required |
