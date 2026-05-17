@@ -74,3 +74,39 @@ def format_failures_table(result: dict) -> str:
         f"total failures: {meta['total_failures']}"
     )
     return "\n".join(lines)
+
+
+def format_bash_table(result: dict, top: int) -> str:
+    """Render the ``03_bash_subcommands`` envelope as a ranked table.
+
+    Only the top-``top`` rows are printed; the full set is always in the
+    JSON envelope. Empty ``rows`` (no bash tool calls) collapses to a
+    single scanned-line.
+    """
+    meta = result["meta"]
+    rows = result["rows"]
+    if not rows:
+        return (
+            f"Scanned {meta['sessions_scanned']} sessions; "
+            "no bash tool calls found."
+        )
+
+    header = (
+        f"{'subcommand':20}  {'count':>6}  {'sessions':>8}  "
+        f"{'calls/ses':>9}  {'fail%':>6}"
+    )
+    rule = "-" * len(header)
+    lines = [header, rule]
+    for r in rows[:top]:
+        lines.append(
+            f"{r['subcommand'][:20]:20}  {r['count']:>6}  "
+            f"{r['sessions']:>8}  {r['calls_per_session']:>9.2f}  "
+            f"{r['fail_rate'] * 100:>5.1f}%"
+        )
+    lines.append(rule)
+    lines.append(
+        f"bash calls: {meta['bash_calls']}  |  "
+        f"distinct subcommands: {meta['distinct_subcommands']}  |  "
+        f"sessions scanned: {meta['sessions_scanned']}"
+    )
+    return "\n".join(lines)
