@@ -8,7 +8,12 @@ import pytest
 
 from agent_audit.database import Database
 from agent_audit.mining import format_sequences_table, get_query, list_queries
-from agent_audit.mining.sequences import tool_sequences_query, trigrams
+from agent_audit.mining.sequences import (
+    _expand_call,
+    bash_sequences_query,
+    tool_sequences_query,
+    trigrams,
+)
 from agent_audit.models import Message, Session, ToolCall
 
 
@@ -58,6 +63,133 @@ def _insert(db, sid, tool_names):
         ],
         tool_results=[],
     ))
+
+
+def _insert_calls(db, sid, calls):
+    """calls: list of (tool_name, command_or_None); strictly increasing ts.
+
+    command -> input_json {"command": cmd}; None -> "{}" (the real-archive
+    empty-command shape that drives the bash:? placeholder).
+    """
+    base = "2026-01-01T10:00:00Z"
+    db.insert_session(Session(
+        id=sid,
+        project=f"p-{sid}",
+        started_at=base,
+        messages=[Message(id=f"m-{sid}", session_id=sid, type="assistant",
+                          timestamp=base, content="")],
+        tool_calls=[
+            ToolCall(
+                id=f"{sid}c{i}", message_id=f"m-{sid}", session_id=sid,
+                tool_name=tname,
+                input_json=(
+                    json.dumps({"command": cmd}) if cmd is not None else "{}"
+                ),
+                timestamp=f"2026-01-01T10:00:{i:02d}Z",
+            )
+            for i, (tname, cmd) in enumerate(calls)
+        ],
+        tool_results=[],
+    ))
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "input_json", "expected"),
+    [
+        ("Bash", '{"command": "git status"}', "bash:git"),
+        ("bash", "{}", "bash:?"),  # empty command -> placeholder, not skip
+        ("Read", '{"command": "ignored"}', "Read"),  # non-bash verbatim
+        ("run_shell_command", '{"command": "npm test"}', "bash:npm"),
+        ("Bash", "not json", "bash:?"),  # unparseable command -> placeholder
+        (None, None, ""),  # NULL tool_name guarded for the →.join
+    ],
+)
+def test_expand_call(tool_name, input_json, expected):
+    assert _expand_call(
+        {"tool_name": tool_name, "input_json": input_json}
+    ) == expected
+
+
+def test_bash_sequences_envelope_and_ordering(db):
+    # s1: 4 git calls -> bash:git x4 -> (bash:git,bash:git,bash:git) twice
+    #     in ONE session => count +2 but sessions +1.
+    _insert_calls(db, "s1", [
+        ("Bash", "git status"), ("Bash", "git diff"),
+        ("Bash", "git push"), ("Bash", "git log"),
+    ])
+    # s2: Read keeps its command-bearing name verbatim; empty {} -> bash:?;
+    #     run_shell_command expands to bash:cargo.
+    _insert_calls(db, "s2", [
+        ("Read", "x"), ("bash", None), ("run_shell_command", "cargo build"),
+    ])
+    _insert_calls(db, "s3", [("Edit", None), ("Read", None)])  # < 3 -> skip
+
+    result = bash_sequences_query(db)
+
+    assert result["name"] == "05_bash_sequences"
+    assert result["meta"] == {
+        "sessions_scanned": 3,
+        "sessions_with_3plus_calls": 2,
+        "distinct_trigrams": 2,
+    }
+    assert result["rows"] == [
+        {"trigram": "bash:git→bash:git→bash:git", "count": 2, "sessions": 1},
+        {"trigram": "Read→bash:?→bash:cargo", "count": 1, "sessions": 1},
+    ]
+    # Invariant guard: 04 is the untouched verbatim baseline -- the same
+    # DB still yields Bash→Bash→Bash, NOT the expanded tokens.
+    base = tool_sequences_query(db)
+    assert base["name"] == "04_tool_sequences"
+    assert base["rows"][0]["trigram"] == "Bash→Bash→Bash"
+
+
+def test_mine_cli_bash_sequences(tmp_path):
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    db_path = tmp_path / "sessions.db"
+    database = Database(db_path)
+    database.connect()
+    _insert_calls(database, "s1", [
+        ("Bash", "cargo build"), ("Bash", "cargo test"),
+        ("Bash", "cargo build"),
+    ])
+    database.close()
+
+    runner = CliRunner()
+
+    res = runner.invoke(main, ["mine", "list"])
+    assert res.exit_code == 0, res.output
+    assert res.output.split() == [
+        "bash", "bash-sequences", "churn", "failures", "sequences"
+    ]
+
+    json_out = tmp_path / "out" / "05_bash_sequences.json"
+    res = runner.invoke(
+        main,
+        ["mine", "bash-sequences", "--db", str(db_path), "--top", "20",
+         "--write-json", str(json_out)],
+    )
+    assert res.exit_code == 0, res.output
+    assert "bash:cargo→bash:cargo→bash:cargo" in res.output
+    assert f"Wrote {json_out}" in res.output
+
+    data = json.loads(json_out.read_text())
+    assert data["name"] == "05_bash_sequences"
+    assert data["rows"][0]["trigram"] == "bash:cargo→bash:cargo→bash:cargo"
+
+
+def test_mine_bash_sequences_missing_db(tmp_path):
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    res = CliRunner().invoke(
+        main, ["mine", "bash-sequences", "--db", str(tmp_path / "nope.db")]
+    )
+    assert res.exit_code == 0
+    assert "No archive database found" in res.output
 
 
 def test_sequences_envelope_and_ordering(db):
@@ -171,7 +303,9 @@ def test_mine_cli_list_and_sequences(tmp_path):
 
     res = runner.invoke(main, ["mine", "list"])
     assert res.exit_code == 0, res.output
-    assert res.output.split() == ["bash", "churn", "failures", "sequences"]
+    assert res.output.split() == [
+        "bash", "bash-sequences", "churn", "failures", "sequences"
+    ]
 
     json_out = tmp_path / "out" / "04_tool_sequences.json"
     res = runner.invoke(
