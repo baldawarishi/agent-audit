@@ -172,7 +172,7 @@ def test_failures_query_no_errors_is_empty(db):
 
 
 def test_registry_has_failures():
-    assert list_queries() == ["bash", "churn", "failures"]
+    assert list_queries() == ["bash", "churn", "failures", "sequences"]
     assert get_query("failures") is failures_query
 
 
@@ -236,7 +236,7 @@ def test_mine_cli_list_and_failures(tmp_path):
 
     res = runner.invoke(main, ["mine", "list"])
     assert res.exit_code == 0, res.output
-    assert res.output.split() == ["bash", "churn", "failures"]
+    assert res.output.split() == ["bash", "churn", "failures", "sequences"]
 
     json_out = tmp_path / "out" / "02_failure_classification.json"
     res = runner.invoke(

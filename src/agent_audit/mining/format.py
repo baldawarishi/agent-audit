@@ -110,3 +110,38 @@ def format_bash_table(result: dict, top: int) -> str:
         f"sessions scanned: {meta['sessions_scanned']}"
     )
     return "\n".join(lines)
+
+
+def format_sequences_table(result: dict, top: int) -> str:
+    """Render the ``04_tool_sequences`` envelope as a ranked table.
+
+    Only the top-``top`` rows are printed; the full set is always in the
+    JSON envelope. ``trigrams:`` in the footer is the grand total of
+    trigram *occurrences* (sum of row counts -- the analog of
+    ``bash calls:``), distinct from ``distinct:`` (unique trigrams).
+    Empty ``rows`` (no session had 3+ tool calls) collapses to a single
+    scanned-line.
+    """
+    meta = result["meta"]
+    rows = result["rows"]
+    if not rows:
+        return (
+            f"Scanned {meta['sessions_scanned']} sessions; "
+            "no 3+-call sequences found."
+        )
+
+    header = f"{'trigram':40}  {'count':>6}  {'sessions':>8}"
+    rule = "-" * len(header)
+    lines = [header, rule]
+    for r in rows[:top]:
+        lines.append(
+            f"{r['trigram'][:40]:40}  {r['count']:>6}  {r['sessions']:>8}"
+        )
+    lines.append(rule)
+    total = sum(r["count"] for r in rows)
+    lines.append(
+        f"trigrams: {total}  |  "
+        f"distinct: {meta['distinct_trigrams']}  |  "
+        f"sessions scanned: {meta['sessions_scanned']}"
+    )
+    return "\n".join(lines)

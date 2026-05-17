@@ -187,7 +187,7 @@ def test_mine_cli_list_and_bash(tmp_path):
 
     res = runner.invoke(main, ["mine", "list"])
     assert res.exit_code == 0, res.output
-    assert res.output.split() == ["bash", "churn", "failures"]
+    assert res.output.split() == ["bash", "churn", "failures", "sequences"]
 
     json_out = tmp_path / "out" / "03_bash_subcommands.json"
     res = runner.invoke(

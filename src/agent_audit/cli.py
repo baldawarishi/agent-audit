@@ -14,6 +14,7 @@ from .mining import (
     format_bash_table,
     format_churn_table,
     format_failures_table,
+    format_sequences_table,
     get_query,
     list_queries,
 )
@@ -1399,6 +1400,53 @@ def mine_bash(
         result = get_query("bash")(db)
 
     click.echo(format_bash_table(result, top))
+
+    if json_path:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(result, indent=2))
+        click.echo(f"Wrote {json_path}")
+
+
+@mine.command("sequences")
+@click.option(
+    "--db",
+    "db_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to sessions.db (default: the archive database).",
+)
+@click.option(
+    "--top",
+    default=20,
+    show_default=True,
+    help="How many of the top trigrams to print.",
+)
+@click.option(
+    "--write-json",
+    "json_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Also write the full {name,meta,rows} envelope to this path as JSON.",
+)
+@click.pass_context
+def mine_sequences(
+    ctx,
+    db_path: Optional[Path],
+    top: int,
+    json_path: Optional[Path],
+):
+    """Rank consecutive tool trigrams fleet-wide (04_tool_sequences)."""
+    cfg: Config = ctx.obj["config"]
+    db_path = db_path or cfg.db_path
+
+    if not db_path.exists():
+        click.echo("No archive database found. Run 'sync' first.")
+        return
+
+    with Database(db_path) as db:
+        result = get_query("sequences")(db)
+
+    click.echo(format_sequences_table(result, top))
 
     if json_path:
         json_path.parent.mkdir(parents=True, exist_ok=True)

@@ -12,11 +12,13 @@ from collections.abc import Callable
 from .bash import bash_subcommands_query
 from .churn import churn_query
 from .failures import failures_query
+from .sequences import tool_sequences_query
 
 REGISTRY: dict[str, Callable[..., dict]] = {
     "bash": bash_subcommands_query,
     "churn": churn_query,
     "failures": failures_query,
+    "sequences": tool_sequences_query,
 }
 
 
