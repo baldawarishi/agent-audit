@@ -38,8 +38,11 @@ uv.lock
 # Archive data (generated)
 /archive/
 
-# Mined query results (generated)
-/results/
+# Mined query results (generated) — incl. frozen baselines/backups
+/results*/
+
+# Working plan (living doc, deliberately uncommitted)
+/plan.md
 
 # OS
 .DS_Store
