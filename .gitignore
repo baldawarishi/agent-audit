@@ -43,5 +43,8 @@ ENV/
 # Working plan (living doc, deliberately uncommitted)
 /plan.md
 
+# Fixture binaries are rebuilt from the committed JSON, never reviewed by hand
+tests/fixtures/agentsview/*.duckdb
+
 # OS
 .DS_Store
