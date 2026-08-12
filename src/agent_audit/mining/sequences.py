@@ -67,9 +67,8 @@ def tool_sequences_query(db: Database) -> dict:
 
     for session in sessions:
         sid = session["id"]
-        # Tool name verbatim; ``or ""`` only guards a NULL row from
-        # crashing the later ``→``.join -- an empty name is itself a
-        # finding, not normalized (mirrors bash.py's defensive tally).
+        # Tool name verbatim; ``or ""`` only NULL-guards the later join --
+        # an empty name is itself a finding, not something to normalize.
         names = [
             (c.get("tool_name") or "")
             for c in db.get_tool_calls_for_session(sid)

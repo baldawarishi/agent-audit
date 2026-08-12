@@ -277,9 +277,8 @@ def parse_session(file_path: Path, project_name: str) -> Session:
             session.claude_version = entry.get("version")
         if not session.slug and entry.get("slug"):
             session.slug = entry.get("slug")
-        # For agent sessions, sessionId points to the parent session
-        # (agentId is the agent's own ID, same as filename suffix)
-        # Only set parent if sessionId differs from own ID (regular sessions have sessionId == own ID)
+        # Agent sessions point sessionId at their parent; regular sessions
+        # point it at themselves, so only a differing id means a parent.
         entry_session_id = entry.get("sessionId")
         if (
             not session.parent_session_id

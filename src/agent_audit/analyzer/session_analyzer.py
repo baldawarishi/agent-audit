@@ -4,10 +4,8 @@ import json
 from pathlib import Path
 from typing import Protocol
 
-# Deterministic miner envelopes the analysis is grounded in, keyed by the
-# NN stage prefix -> the command that regenerates that envelope. All five are
-# mandatory: a missing one hard-fails (no soft-degrade — explicit user steer
-# 2026-05-17, overriding the plan's prior soft-degrade Invariant).
+# Stage prefix -> the command that regenerates that envelope. All five are
+# mandatory: a missing one hard-fails, with no soft-degrade.
 _REQUIRED_MINED = {
     "01": "agent-audit mine churn --write-json results/01_churn.json",
     "02": "agent-audit mine failures --write-json results/02_failure_classification.json",

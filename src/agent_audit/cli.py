@@ -843,9 +843,8 @@ def _run_session_analysis(ctx, cfg: Config):
     with db:
         projects = db.get_stats()["projects"]
 
-    # Grounding is mandatory: load the deterministic miner envelopes up front
-    # so a missing one aborts the whole run loudly, before any project is
-    # analyzed (no per-project soft skip, no ungrounded fallback).
+    # Load grounding up front so a missing envelope aborts the whole run
+    # loudly, rather than silently skipping one project.
     try:
         mined_findings = load_mined_findings(Path("results"))
     except FileNotFoundError as e:

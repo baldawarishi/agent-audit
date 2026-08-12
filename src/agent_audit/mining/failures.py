@@ -12,12 +12,8 @@ import re
 
 from ..database import Database
 
-# Ordered: the FIRST rule that matches the lowered content wins. Keep
-# auth/not_found before http_client so 401/404 beat 400. HTTP status codes
-# use (?<!\.)\b...\b: \b rejects alnum-embedded substrings (e.g. "400"
-# inside "0xdd68d8d4000") and the lookbehind rejects decimal fractions
-# (e.g. "3.400") while still allowing trailing-period prose ("404.").
-# Text phrases stay plain substrings. ``code`` is None when none apply.
+# First match wins, so auth/not_found precede http_client (401/404 beat 400).
+# Codes use (?<!\.)\b...\b to reject "0xdd68d8d4000" and "3.400", keeping "404.".
 _ERROR_RULES: list[tuple[str, tuple[str, ...], re.Pattern | None]] = [
     ("auth",
      ("unauthorized", "forbidden", "permission denied"),

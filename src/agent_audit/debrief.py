@@ -216,9 +216,7 @@ def _format_pr_markdown(pr: dict, repo: str) -> str:
     return md
 
 
-# ---------------------------------------------------------------------------
-# Pre-analysis helpers
-# ---------------------------------------------------------------------------
+# --- Pre-analysis helpers ---------------------------------------------------
 
 
 def _extract_opening_context(messages: list[dict]) -> str:
@@ -566,9 +564,7 @@ def _build_timeline_summary(messages: list[dict], commits: list[dict]) -> str:
     return ". ".join(parts) + "."
 
 
-# ---------------------------------------------------------------------------
-# Pre-analysis: top-level builder + markdown renderer
-# ---------------------------------------------------------------------------
+# --- Pre-analysis: top-level builder + markdown renderer --------------------
 
 
 def build_session_preanalysis(
@@ -681,9 +677,7 @@ def _render_preanalysis_md(preanalysis: dict) -> str:
     return md
 
 
-# ---------------------------------------------------------------------------
-# Composition helpers — build guide content from preanalysis
-# ---------------------------------------------------------------------------
+# --- Composition helpers: build guide content from preanalysis --------------
 
 
 def _compose_what_happened(preanalysis: dict, primary_session: dict) -> str:

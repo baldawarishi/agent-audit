@@ -12,9 +12,8 @@ REPO_PUSH_PATTERN = re.compile(
     r"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)/pull/new/"
 )
 
-# Regex to extract owner/repo from a git remote URL (any platform)
-# Matches: https://host/owner/repo(.git), git@host:owner/repo(.git)
-# Also handles GitLab nested groups: host/group/subgroup/project
+# owner/repo from any git remote URL -- https://host/owner/repo(.git),
+# git@host:owner/repo(.git), and GitLab nested groups.
 REPO_URL_PATTERN = re.compile(
     r"(?:https?://|git@)([^/:\s]+)[/:](.+?)(?:\.git)?$"
 )

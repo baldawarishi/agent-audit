@@ -134,9 +134,7 @@ def _make_commit(message="Fix bug", commit_id="commit-1", timestamp="2026-02-10T
     }
 
 
-# ---------------------------------------------------------------------------
-# Pre-analysis helper tests
-# ---------------------------------------------------------------------------
+# --- Pre-analysis helper tests ----------------------------------------------
 
 
 class TestExtractOpeningContext:
@@ -491,9 +489,7 @@ class TestBuildTimelineSummary:
         assert "Commits:" in result
 
 
-# ---------------------------------------------------------------------------
-# Pre-analysis integration test
-# ---------------------------------------------------------------------------
+# --- Pre-analysis integration test ------------------------------------------
 
 
 class TestBuildSessionPreanalysis:
@@ -556,9 +552,7 @@ class TestBuildSessionPreanalysis:
         assert "## Timeline" in md
 
 
-# ---------------------------------------------------------------------------
-# Composition helper tests
-# ---------------------------------------------------------------------------
+# --- Composition helper tests -----------------------------------------------
 
 
 class TestComposeWhatHappened:
@@ -659,9 +653,7 @@ class TestComposeSessionSpecificQuestions:
         assert "wrong" in result.lower() or "course correction" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# Existing test classes (updated where needed)
-# ---------------------------------------------------------------------------
+# --- Existing test classes --------------------------------------------------
 
 
 class TestDiscoverRelatedSessions:

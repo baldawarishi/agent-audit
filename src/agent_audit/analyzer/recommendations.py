@@ -154,9 +154,8 @@ def parse_recommendations_from_synthesis(synthesis_path: Path) -> list[Recommend
             "Ensure synthesis was generated with structured output enabled."
         )
 
-    # Parse each block and collect all recommendations
-    # Some blocks may have invalid TOML (e.g., unescaped backslashes from LLM output)
-    # We parse what we can and warn about failures
+    # Parse what we can and warn on the rest: LLM output sometimes emits
+    # invalid TOML (e.g. unescaped backslashes).
     all_recommendations_data = []
     parse_warnings = []
     for i, toml_content in enumerate(toml_blocks):
