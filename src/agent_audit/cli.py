@@ -18,6 +18,7 @@ from .mining import (
     get_query,
     list_queries,
 )
+from .mining.source import DEFAULT_MIRROR_PATH, AgentsViewSource
 from .parser import (
     discover_sessions as discover_claude_sessions,
     get_project_name_from_dir,
@@ -1257,6 +1258,26 @@ def debrief(ctx, session_id: str, archive_dir: Optional[Path]):
             click.echo(f"Error: {e}")
 
 
+MISSING_SOURCE = {
+    "archive": "No archive database found. Run 'sync' first.",
+    "agentsview": "No AgentsView mirror found. Run 'agentsview duckdb push'.",
+}
+
+
+def resolve_source_path(source: str, db_path: Optional[Path], cfg: Config) -> Path:
+    """An explicit --db wins; else the archive DB or the mirror, per --source."""
+    if db_path:
+        return db_path
+    return DEFAULT_MIRROR_PATH if source == "agentsview" else cfg.db_path
+
+
+def open_session_source(source: str, db_path: Path):
+    """Open --source behind the seam's 3 methods; both stores satisfy it."""
+    if source == "agentsview":
+        return AgentsViewSource(db_path)
+    return Database(db_path)
+
+
 @main.group("mine")
 def mine():
     """Deterministic transcript-mining queries."""
@@ -1422,7 +1443,14 @@ def mine_bash(
     "db_path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to sessions.db (default: the archive database).",
+    help="Path to the store (default: per --source).",
+)
+@click.option(
+    "--source",
+    type=click.Choice(["archive", "agentsview"]),
+    default="archive",
+    show_default=True,
+    help="Read the archive database or the AgentsView DuckDB mirror.",
 )
 @click.option(
     "--top",
@@ -1441,18 +1469,19 @@ def mine_bash(
 def mine_sequences(
     ctx,
     db_path: Optional[Path],
+    source: str,
     top: int,
     json_path: Optional[Path],
 ):
     """Rank consecutive tool trigrams fleet-wide (04_tool_sequences)."""
     cfg: Config = ctx.obj["config"]
-    db_path = db_path or cfg.db_path
+    db_path = resolve_source_path(source, db_path, cfg)
 
     if not db_path.exists():
-        click.echo("No archive database found. Run 'sync' first.")
+        click.echo(MISSING_SOURCE[source])
         return
 
-    with Database(db_path) as db:
+    with open_session_source(source, db_path) as db:
         result = get_query("sequences")(db)
 
     click.echo(format_sequences_table(result, top))

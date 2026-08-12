@@ -32,8 +32,8 @@ normalization of the baseline.
 
 from __future__ import annotations
 
-from ..database import Database
 from .bash import _BASH_TOOL_NAMES, _command_text, first_token
+from .source import SessionSource
 
 
 def trigrams(tool_names: list[str]) -> list[tuple[str, str, str]]:
@@ -49,7 +49,7 @@ def trigrams(tool_names: list[str]) -> list[tuple[str, str, str]]:
     ]
 
 
-def tool_sequences_query(db: Database) -> dict:
+def tool_sequences_query(db: SessionSource) -> dict:
     """Aggregate tool trigrams fleet-wide; return ``{name, meta, rows}``.
 
     Per session: the timestamp-ordered tool-name stream
@@ -123,7 +123,7 @@ def _expand_call(call: dict) -> str:
     return call.get("tool_name") or ""
 
 
-def bash_sequences_query(db: Database) -> dict:
+def bash_sequences_query(db: SessionSource) -> dict:
     """Bash-subcommand-expanded tool trigrams; return ``{name, meta, rows}``.
 
     Identical aggregation to ``tool_sequences_query`` (consecutive
