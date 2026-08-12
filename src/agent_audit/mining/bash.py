@@ -17,13 +17,12 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from typing import Any
 
 from ..database import Database
 
-# Matched against tool_name.lower(). Evidence-backed (real archive:
-# Bash / bash / run_shell_command) plus codex_parser's local_shell_call
-# fallback (codex_parser.py:217). Deliberately not a generic ``*shell*``
-# match -- KillShell / run_experiment are not command runners.
+# Matched against tool_name.lower(); evidence-backed, deliberately not a
+# generic ``*shell*`` match (KillShell / run_experiment are not runners).
 _BASH_TOOL_NAMES = frozenset({"bash", "run_shell_command", "local_shell_call"})
 
 # Wrapper words: the real subcommand is the next token after these.
@@ -80,9 +79,8 @@ def first_token(command: str | None) -> str:
     text = command.strip()
     if not text:
         return ""
-    # Truncate to the first stage: each cut removes text at/after the
-    # first separator found, so the earliest separator (of any kind)
-    # ultimately wins regardless of which we scan for first.
+    # Cut at the earliest separator: each cut drops everything after the
+    # first hit, so scan order does not matter.
     for sep in _STAGE_SEPS:
         idx = text.find(sep)
         if idx != -1:
@@ -117,7 +115,8 @@ def bash_subcommands_query(db: Database) -> dict:
 
     for session in sessions:
         sid = session["id"]
-        call_sub: dict[str, str] = {}
+        # Keys are untyped row ids; ``Any`` spares the lookup below a cast.
+        call_sub: dict[Any, str] = {}
         for c in db.get_tool_calls_for_session(sid):
             if (c.get("tool_name") or "").lower() not in _BASH_TOOL_NAMES:
                 continue
