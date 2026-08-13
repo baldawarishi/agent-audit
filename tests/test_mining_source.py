@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 from agent_audit.database import Database
-from agent_audit.mining.sequences import tool_sequences_query
+from agent_audit.mining.bash import NO_FAIL_SIGNAL, bash_subcommands_query
+from agent_audit.mining.sequences import bash_sequences_query, tool_sequences_query
 from agent_audit.mining.source import (
     DEFAULT_MIRROR_PATH,
     AgentsViewSource,
@@ -112,6 +113,86 @@ def test_tool_sequences_over_the_mirror(source):
     # and antigravity still yields trigrams with no result text at all.
     assert "exec→exec→exec" in trigrams and "exec_command→exec→exec" in trigrams
     assert "view_file→view_file→view_file" in trigrams
+
+
+def test_bash_subcommands_over_the_mirror(source):
+    """codex ``exec_command`` counts, and fail_rate comes back unknown."""
+    result = bash_subcommands_query(source)
+
+    assert result["meta"] == {
+        "sessions_scanned": 3,
+        "bash_calls": 19,           # 13 Claude Bash + 6 codex exec_command
+        "distinct_subcommands": 8,
+        "fail_rate_known": False,
+        "fail_rate_note": NO_FAIL_SIGNAL,
+    }
+    subs = {r["subcommand"] for r in result["rows"]}
+    assert {"uv", "pwd", "nl", "system_profiler"} <= subs  # exec_command's cmds
+    # is_error is None on the mirror: unknown, never a computed-looking 0.0.
+    assert all(r["fail_rate"] is None for r in result["rows"])
+
+
+def test_bash_sequences_over_the_mirror(source):
+    """``exec_command`` expands to ``bash:*``; JavaScript ``exec`` stays verbatim."""
+    result = bash_sequences_query(source)
+
+    assert result["name"] == "05_bash_sequences"
+    assert result["meta"]["distinct_trigrams"] == 37
+    trigrams = {r["trigram"] for r in result["rows"]}
+    assert "exec→exec→exec" in trigrams
+    assert "bash:pwd→exec→exec" in trigrams and "exec→bash:uv→update_plan" in trigrams
+    top_bash = next(r for r in result["rows"] if r["trigram"].startswith("bash:"))
+    assert top_bash == {
+        "trigram": "bash:cd→bash:cd→bash:cd", "count": 7, "sessions": 1
+    }
+    # 04 keeps the same stream unexpanded -- the baseline is untouched.
+    assert "Bash→Bash→Bash" not in trigrams
+
+
+def test_mine_bash_cli_reads_the_mirror(mirror_path, tmp_path):
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    json_out = tmp_path / "out" / "03_bash_subcommands.json"
+    res = CliRunner().invoke(
+        main,
+        ["mine", "bash", "--source", "agentsview", "--db", str(mirror_path),
+         "--top", "2", "--write-json", str(json_out)],
+    )
+    assert res.exit_code == 0, res.output
+    assert "bash calls: 19" in res.output
+    assert "0.0%" not in res.output and NO_FAIL_SIGNAL in res.output
+
+    data = json.loads(json_out.read_text())
+    assert data["meta"]["fail_rate_known"] is False
+    assert data["rows"][0] == {
+        "subcommand": "cd", "count": 11, "sessions": 1,
+        "calls_per_session": 11.0, "fail_rate": None,
+    }
+
+
+def test_mine_bash_sequences_cli_reads_the_mirror(mirror_path, tmp_path):
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    res = CliRunner().invoke(
+        main,
+        ["mine", "bash-sequences", "--source", "agentsview",
+         "--db", str(mirror_path), "--top", "2"],
+    )
+    assert res.exit_code == 0, res.output
+    assert "bash:cd→bash:cd→bash:cd" in res.output
+    assert "distinct: 37" in res.output
+
+    missing = CliRunner().invoke(
+        main,
+        ["mine", "bash-sequences", "--source", "agentsview",
+         "--db", str(tmp_path / "nope.duckdb")],
+    )
+    assert missing.exit_code == 0
+    assert "No AgentsView mirror found" in missing.output
 
 
 def test_mine_sequences_cli_reads_the_mirror(mirror_path, tmp_path):

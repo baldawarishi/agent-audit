@@ -76,12 +76,18 @@ def format_failures_table(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _fail_pct(value: float | None) -> str:
+    """``None`` (source has no ``is_error``) prints ``?``, never ``0.0%``."""
+    return f"{'?':>6}" if value is None else f"{value * 100:>5.1f}%"
+
+
 def format_bash_table(result: dict, top: int) -> str:
     """Render the ``03_bash_subcommands`` envelope as a ranked table.
 
     Only the top-``top`` rows are printed; the full set is always in the
     JSON envelope. Empty ``rows`` (no bash tool calls) collapses to a
-    single scanned-line.
+    single scanned-line. An unmeasurable ``fail_rate`` prints ``?`` and
+    earns a footer line naming why (``meta.fail_rate_note``).
     """
     meta = result["meta"]
     rows = result["rows"]
@@ -101,7 +107,7 @@ def format_bash_table(result: dict, top: int) -> str:
         lines.append(
             f"{r['subcommand'][:20]:20}  {r['count']:>6}  "
             f"{r['sessions']:>8}  {r['calls_per_session']:>9.2f}  "
-            f"{r['fail_rate'] * 100:>5.1f}%"
+            f"{_fail_pct(r['fail_rate'])}"
         )
     lines.append(rule)
     lines.append(
@@ -109,6 +115,8 @@ def format_bash_table(result: dict, top: int) -> str:
         f"distinct subcommands: {meta['distinct_subcommands']}  |  "
         f"sessions scanned: {meta['sessions_scanned']}"
     )
+    if meta.get("fail_rate_note"):
+        lines.append(meta["fail_rate_note"])
     return "\n".join(lines)
 
 

@@ -10,6 +10,12 @@ dominate it.
 no smart-rewrite) -- ``cd``/subshells/heredocs are findings to interpret
 downstream, not a license to normalize here (mirrors the churn-formula
 discipline).
+
+``exec_command`` (codex) joined the bash family in Step 3: it carries
+``cmd``, which ``_command_text`` already reads (``first_token`` recovered
+400/400 in the Step-1 probe). Its sibling ``exec`` stays **out** -- that
+tool's ``input_json`` is raw JavaScript, not JSON, so it is not a shell
+runner (``first_token`` 0/400).
 """
 
 from __future__ import annotations
@@ -19,11 +25,16 @@ import re
 import shlex
 from typing import Any
 
-from ..database import Database
+from .source import SessionSource
 
 # Matched against tool_name.lower(); evidence-backed, deliberately not a
 # generic ``*shell*`` match (KillShell / run_experiment are not runners).
-_BASH_TOOL_NAMES = frozenset({"bash", "run_shell_command", "local_shell_call"})
+_BASH_TOOL_NAMES = frozenset(
+    {"bash", "run_shell_command", "local_shell_call", "exec_command"}
+)
+
+# Printed and stored verbatim wherever ``fail_rate`` comes back ``None``.
+NO_FAIL_SIGNAL = "fail_rate unknown: source carries no is_error flag (Step 4 backfills)"
 
 # Wrapper words: the real subcommand is the next token after these.
 _WRAPPERS = frozenset({"sudo", "env", "time", "exec", "nohup", "command"})
@@ -99,19 +110,33 @@ def first_token(command: str | None) -> str:
     return ""
 
 
-def bash_subcommands_query(db: Database) -> dict:
+def _fail_rate(entry: dict, known: bool) -> float | None:
+    """Failing-calls / calls, or ``None`` when the source has no fail signal.
+
+    Unknown must stay ``None``: a computed-looking ``0.0`` would read as
+    "measured, nothing failed" (see ``NO_FAIL_SIGNAL``).
+    """
+    if not known:
+        return None
+    return entry["fail"] / entry["count"] if entry["count"] else 0.0
+
+
+def bash_subcommands_query(db: SessionSource) -> dict:
     """Aggregate bash subcommands fleet-wide; return ``{name, meta, rows}``.
 
     One bash-family ``tool_call`` contributes exactly one to its
     subcommand's ``count`` (per-call tally -- distinct from Step-4's
     per-*result* tally). A call is "failing" if it has *any* ``is_error``
-    result, so ``fail_rate`` is failing-calls / calls. ``rows`` is sorted
+    result, so ``fail_rate`` is failing-calls / calls -- unless the source
+    never reports ``is_error`` at all (the AgentsView mirror), in which case
+    every ``fail_rate`` is ``None`` and ``meta`` says why. ``rows`` is sorted
     count-descending, ties broken by ``subcommand`` ascending, and is
     **not** truncated -- top-N is a CLI presentation concern.
     """
     sessions = db.get_all_sessions()
     agg: dict[str, dict] = {}
     bash_calls = 0
+    fail_signal = False
 
     for session in sessions:
         sid = session["id"]
@@ -132,9 +157,15 @@ def bash_subcommands_query(db: Database) -> dict:
             entry["sessions"].add(sid)
         if not call_sub:
             continue
+        results = db.get_tool_results_for_session(sid)
+        # One non-None ``is_error`` anywhere means the source can measure
+        # fail_rate; all-None (the mirror) means it cannot.
+        fail_signal = fail_signal or any(
+            r.get("is_error") is not None for r in results
+        )
         failing = {
             r.get("tool_call_id")
-            for r in db.get_tool_results_for_session(sid)
+            for r in results
             if r.get("is_error") and r.get("tool_call_id") in call_sub
         }
         for cid in failing:
@@ -148,7 +179,7 @@ def bash_subcommands_query(db: Database) -> dict:
             "calls_per_session": (
                 e["count"] / len(e["sessions"]) if e["sessions"] else 0.0
             ),
-            "fail_rate": e["fail"] / e["count"] if e["count"] else 0.0,
+            "fail_rate": _fail_rate(e, fail_signal),
         }
         for sub, e in agg.items()
     ]
@@ -159,6 +190,8 @@ def bash_subcommands_query(db: Database) -> dict:
             "sessions_scanned": len(sessions),
             "bash_calls": bash_calls,
             "distinct_subcommands": len(agg),
+            "fail_rate_known": fail_signal,
+            "fail_rate_note": None if fail_signal else NO_FAIL_SIGNAL,
         },
         "rows": rows,
     }

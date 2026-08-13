@@ -1396,7 +1396,14 @@ def mine_failures(
     "db_path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to sessions.db (default: the archive database).",
+    help="Path to the store (default: per --source).",
+)
+@click.option(
+    "--source",
+    type=click.Choice(["archive", "agentsview"]),
+    default="archive",
+    show_default=True,
+    help="Read the archive database or the AgentsView DuckDB mirror.",
 )
 @click.option(
     "--top",
@@ -1415,18 +1422,19 @@ def mine_failures(
 def mine_bash(
     ctx,
     db_path: Optional[Path],
+    source: str,
     top: int,
     json_path: Optional[Path],
 ):
     """Rank bash subcommands fleet-wide (03_bash_subcommands)."""
     cfg: Config = ctx.obj["config"]
-    db_path = db_path or cfg.db_path
+    db_path = resolve_source_path(source, db_path, cfg)
 
     if not db_path.exists():
-        click.echo("No archive database found. Run 'sync' first.")
+        click.echo(MISSING_SOURCE[source])
         return
 
-    with Database(db_path) as db:
+    with open_session_source(source, db_path) as db:
         result = get_query("bash")(db)
 
     click.echo(format_bash_table(result, top))
@@ -1498,7 +1506,14 @@ def mine_sequences(
     "db_path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to sessions.db (default: the archive database).",
+    help="Path to the store (default: per --source).",
+)
+@click.option(
+    "--source",
+    type=click.Choice(["archive", "agentsview"]),
+    default="archive",
+    show_default=True,
+    help="Read the archive database or the AgentsView DuckDB mirror.",
 )
 @click.option(
     "--top",
@@ -1517,18 +1532,19 @@ def mine_sequences(
 def mine_bash_sequences(
     ctx,
     db_path: Optional[Path],
+    source: str,
     top: int,
     json_path: Optional[Path],
 ):
     """Rank bash-subcommand-expanded trigrams fleet-wide (05_bash_sequences)."""
     cfg: Config = ctx.obj["config"]
-    db_path = db_path or cfg.db_path
+    db_path = resolve_source_path(source, db_path, cfg)
 
     if not db_path.exists():
-        click.echo("No archive database found. Run 'sync' first.")
+        click.echo(MISSING_SOURCE[source])
         return
 
-    with Database(db_path) as db:
+    with open_session_source(source, db_path) as db:
         result = get_query("bash-sequences")(db)
 
     click.echo(format_sequences_table(result, top))

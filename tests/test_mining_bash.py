@@ -9,6 +9,7 @@ import pytest
 from agent_audit.database import Database
 from agent_audit.mining import format_bash_table, get_query, list_queries
 from agent_audit.mining.bash import (
+    NO_FAIL_SIGNAL,
     _command_text,
     bash_subcommands_query,
     first_token,
@@ -107,6 +108,8 @@ def test_bash_query_envelope_and_ordering(db):
         "sessions_scanned": 2,
         "bash_calls": 4,           # Read excluded
         "distinct_subcommands": 2,  # git, npm
+        "fail_rate_known": True,    # the archive carries is_error
+        "fail_rate_note": None,
     }
 
     rows = result["rows"]
@@ -119,6 +122,37 @@ def test_bash_query_envelope_and_ordering(db):
     npm = rows[1]
     assert npm["count"] == 1
     assert npm["fail_rate"] == 0.0
+
+
+def test_exec_command_is_bash_family_but_exec_is_not(db):
+    """codex's ``exec_command`` carries ``cmd``; its ``exec`` is JavaScript."""
+    ts = "2026-01-01T10:00:00Z"
+    db.insert_session(Session(
+        id="s3", project="petri", started_at=ts,
+        messages=[Message(id="m3", session_id="s3", type="assistant",
+                          timestamp=ts, content="")],
+        tool_calls=[
+            ToolCall(id="c1", message_id="m3", session_id="s3",
+                     tool_name="exec_command",
+                     input_json=json.dumps({"cmd": "uv run pytest -q"}),
+                     timestamp=ts),
+            ToolCall(id="c2", message_id="m3", session_id="s3",
+                     tool_name="exec",
+                     input_json='const r = await tools.exec_command({cmd:"ls"});',
+                     timestamp=ts),
+        ],
+        tool_results=[ToolResult(id="r1", tool_call_id="c1", session_id="s3",
+                                 content="Exit code 1", is_error=True,
+                                 timestamp=ts)],
+    ))
+
+    result = bash_subcommands_query(db)
+
+    assert [r["subcommand"] for r in result["rows"]] == ["uv"]
+    assert result["meta"]["bash_calls"] == 1  # the JavaScript exec is excluded
+    # The archive still measures fail_rate -- only the mirror leaves it unknown.
+    assert result["rows"][0]["fail_rate"] == 1.0
+    assert result["meta"]["fail_rate_known"] is True
 
 
 def test_bash_query_no_bash_calls(db):
@@ -166,6 +200,24 @@ def test_format_bash_table_known_envelope():
     assert lines[-1] == (
         "bash calls: 4  |  distinct subcommands: 1  |  sessions scanned: 3"
     )
+
+
+def test_format_bash_table_unknown_fail_rate():
+    """An unmeasurable fail_rate prints ``?`` + a reason, never ``0.0%``."""
+    result = {
+        "name": "03_bash_subcommands",
+        "meta": {"sessions_scanned": 3, "bash_calls": 4,
+                 "distinct_subcommands": 1, "fail_rate_known": False,
+                 "fail_rate_note": NO_FAIL_SIGNAL},
+        "rows": [{
+            "subcommand": "git", "count": 3, "sessions": 2,
+            "calls_per_session": 1.5, "fail_rate": None,
+        }],
+    }
+    out = format_bash_table(result, top=20)
+    assert "0.0%" not in out and "%" not in out.splitlines()[2]
+    assert out.splitlines()[2].endswith("?")
+    assert out.splitlines()[-1] == NO_FAIL_SIGNAL
 
 
 def test_mine_cli_list_and_bash(tmp_path):
