@@ -81,10 +81,13 @@ def _insert(db, sid, calls, fail_ids=()):
             )
             for cid, tname, cmd in calls
         ],
+        # The archive answers is_error for ~every call (21190/21225 bash
+        # calls carry a result row), so the fixture does too.
         tool_results=[
             ToolResult(id=f"r-{cid}", tool_call_id=cid, session_id=sid,
-                       content="Exit code 1", is_error=True, timestamp=ts)
-            for cid in fail_ids
+                       content="Exit code 1" if cid in fail_ids else "ok",
+                       is_error=cid in fail_ids, timestamp=ts)
+            for cid, _, _ in calls
         ],
     ))
 
@@ -107,6 +110,7 @@ def test_bash_query_envelope_and_ordering(db):
     assert meta == {
         "sessions_scanned": 2,
         "bash_calls": 4,           # Read excluded
+        "measured_calls": 4,
         "distinct_subcommands": 2,  # git, npm
         "fail_rate_known": True,    # the archive carries is_error
         "fail_rate_note": None,
@@ -153,6 +157,37 @@ def test_exec_command_is_bash_family_but_exec_is_not(db):
     # The archive still measures fail_rate -- only the mirror leaves it unknown.
     assert result["rows"][0]["fail_rate"] == 1.0
     assert result["meta"]["fail_rate_known"] is True
+
+
+class _MixedSource:
+    """Two agents in one store: one reports is_error, one cannot (the mirror)."""
+
+    def get_all_sessions(self):
+        return [{"id": "judged"}, {"id": "blind"}]
+
+    def get_tool_calls_for_session(self, sid):
+        cmd = "git status" if sid == "judged" else "npm test"
+        return [{"id": f"{sid}-c{i}", "tool_name": "Bash",
+                 "input_json": json.dumps({"command": cmd})} for i in (1, 2)]
+
+    def get_tool_results_for_session(self, sid):
+        flags = (True, False) if sid == "judged" else (None, None)
+        return [{"tool_call_id": f"{sid}-c{i}", "is_error": flag}
+                for i, flag in zip((1, 2), flags)]
+
+
+def test_fail_rate_is_per_row_not_a_global_or():
+    """A judged agent keeps its fail%; a blind one still prints ? beside it."""
+    result = bash_subcommands_query(_MixedSource())
+
+    rows = {r["subcommand"]: r for r in result["rows"]}
+    assert rows["git"]["fail_rate"] == 0.5 and rows["git"]["measured_calls"] == 2
+    assert rows["npm"]["fail_rate"] is None and rows["npm"]["measured_calls"] == 0
+    meta = result["meta"]
+    assert (meta["bash_calls"], meta["measured_calls"]) == (4, 2)
+    assert meta["fail_rate_known"] is False
+    assert "2/4 bash calls" in meta["fail_rate_note"]
+    assert "?" in format_bash_table(result, 20).splitlines()[3]
 
 
 def test_bash_query_no_bash_calls(db):

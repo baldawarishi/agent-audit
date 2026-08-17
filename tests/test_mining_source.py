@@ -15,6 +15,7 @@ import pytest
 
 from agent_audit.database import Database
 from agent_audit.mining.bash import NO_FAIL_SIGNAL, bash_subcommands_query
+from agent_audit.mining.churn import churn_query
 from agent_audit.mining.sequences import bash_sequences_query, tool_sequences_query
 from agent_audit.mining.source import (
     DEFAULT_MIRROR_PATH,
@@ -81,14 +82,29 @@ def test_call_ids_are_synthesized_because_the_mirror_leaves_them_null(source):
     assert all(c["tool_use_id"] for c in calls)  # carried for Step 4/5
 
 
-def test_results_leave_is_error_unknown(source):
+def test_is_error_is_read_from_the_result_text(source):
+    """The text detector is the mirror's fail signal (Step 4)."""
     results = source.get_tool_results_for_session(CLAUDE)
     calls = source.get_tool_calls_for_session(CLAUDE)
     assert [r["tool_call_id"] for r in results] == [c["id"] for c in calls]
-    assert all(r["is_error"] is None for r in results)
-    assert any((r["content"] or "").startswith("Exit code 1") for r in results)
-    assert not any(
-        r["content"] for r in source.get_tool_results_for_session(ANTIGRAVITY)
+
+    failed = [r for r in results if r["is_error"]]
+    assert failed and all(
+        (r["content"] or "").startswith("Exit code 1") for r in failed
+    )
+    assert any(r["is_error"] is False for r in results)  # succeeded, measured
+
+
+def test_textless_calls_stay_unknown_never_false(source):
+    """antigravity carries no result_content, so it can claim nothing."""
+    results = source.get_tool_results_for_session(ANTIGRAVITY)
+    assert results and all(r["is_error"] is None for r in results)
+    assert not any(r["content"] for r in results)
+    # The same rule applies per call, not per agent: a Claude call with no
+    # result text is unjudged too.
+    assert any(
+        r["is_error"] is None
+        for r in source.get_tool_results_for_session(CLAUDE)
     )
 
 
@@ -116,20 +132,23 @@ def test_tool_sequences_over_the_mirror(source):
 
 
 def test_bash_subcommands_over_the_mirror(source):
-    """codex ``exec_command`` counts, and fail_rate comes back unknown."""
+    """codex ``exec_command`` counts, and fail_rate is now measured."""
     result = bash_subcommands_query(source)
 
     assert result["meta"] == {
         "sessions_scanned": 3,
         "bash_calls": 19,           # 13 Claude Bash + 6 codex exec_command
+        "measured_calls": 19,       # every bash call here carries result text
         "distinct_subcommands": 8,
-        "fail_rate_known": False,
-        "fail_rate_note": NO_FAIL_SIGNAL,
+        "fail_rate_known": True,
+        "fail_rate_note": None,
     }
     subs = {r["subcommand"] for r in result["rows"]}
     assert {"uv", "pwd", "nl", "system_profiler"} <= subs  # exec_command's cmds
-    # is_error is None on the mirror: unknown, never a computed-looking 0.0.
-    assert all(r["fail_rate"] is None for r in result["rows"])
+    rows = {r["subcommand"]: r for r in result["rows"]}
+    assert rows["ls"]["fail_rate"] == 1.0            # the `No such file` call
+    assert rows["cd"]["fail_rate"] == pytest.approx(1 / 11)
+    assert rows["uv"]["fail_rate"] == 0.0            # measured, not assumed
 
 
 def test_bash_sequences_over_the_mirror(source):
@@ -149,6 +168,52 @@ def test_bash_sequences_over_the_mirror(source):
     assert "Bash→Bash→Bash" not in trigrams
 
 
+def test_churn_over_the_mirror(source):
+    """``01`` gets a real fail term, and claims nothing where it has no signal."""
+    result = churn_query(source, gap=120.0)
+
+    rows = {r["session_id"]: r for r in result["rows"]}
+    claude = rows[CLAUDE]
+    assert (claude["total"], claude["sequences"], claude["fail_count"]) == (18, 2, 2)
+    assert claude["churn"] == pytest.approx(2 * (1 + 2 / 18))  # formula verbatim
+    blind = rows[ANTIGRAVITY]
+    assert blind["measured_calls"] == 0 and blind["fail_count"] == 0
+    assert blind["churn"] == blind["sequences"]  # no fail term is claimable
+    assert rows[CODEX]["measured_calls"] == 25   # judged, and none failed
+
+    meta = result["meta"]
+    assert (meta["calls_scanned"], meta["calls_measured"]) == (67, 42)
+    assert "42/67 calls" in meta["fail_signal_note"]
+
+
+def test_mine_churn_cli_reads_the_mirror(mirror_path, tmp_path):
+    from click.testing import CliRunner
+
+    from agent_audit.cli import main
+
+    json_out = tmp_path / "out" / "01_churn.json"
+    res = CliRunner().invoke(
+        main,
+        ["mine", "churn", "--source", "agentsview", "--db", str(mirror_path),
+         "--write-json", str(json_out)],
+    )
+    assert res.exit_code == 0, res.output
+    assert "11.1%" in res.output and "median churn: 1.00" in res.output
+    unjudged = next(ln for ln in res.output.splitlines() if ln.startswith("antigrav"))
+    assert unjudged.split()[-2] == "?"
+
+    data = json.loads(json_out.read_text())
+    assert data["rows"][0]["session_id"] == CLAUDE
+    assert data["meta"]["calls_measured"] == 42
+
+    missing = CliRunner().invoke(
+        main,
+        ["mine", "churn", "--source", "agentsview",
+         "--db", str(tmp_path / "nope.duckdb")],
+    )
+    assert "No AgentsView mirror found" in missing.output
+
+
 def test_mine_bash_cli_reads_the_mirror(mirror_path, tmp_path):
     from click.testing import CliRunner
 
@@ -162,13 +227,14 @@ def test_mine_bash_cli_reads_the_mirror(mirror_path, tmp_path):
     )
     assert res.exit_code == 0, res.output
     assert "bash calls: 19" in res.output
-    assert "0.0%" not in res.output and NO_FAIL_SIGNAL in res.output
+    assert "9.1%" in res.output and NO_FAIL_SIGNAL not in res.output
 
     data = json.loads(json_out.read_text())
-    assert data["meta"]["fail_rate_known"] is False
+    assert data["meta"]["fail_rate_known"] is True
     assert data["rows"][0] == {
         "subcommand": "cd", "count": 11, "sessions": 1,
-        "calls_per_session": 11.0, "fail_rate": None,
+        "calls_per_session": 11.0, "fail_rate": pytest.approx(1 / 11),
+        "measured_calls": 11,
     }
 
 

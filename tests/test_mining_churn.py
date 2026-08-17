@@ -71,6 +71,23 @@ def test_fail_count_zero_when_no_results():
     assert churn.fail_count([{"id": "c1"}, {"id": "c2"}], []) == 0
 
 
+def test_fail_counts_separates_unknown_from_success():
+    """A None is_error (mirror: no result text) is unjudged, not a success."""
+    calls = [{"id": "c1"}, {"id": "c2"}, {"id": "c3"}]
+    results = [
+        {"tool_call_id": "c1", "is_error": True},
+        {"tool_call_id": "c2", "is_error": False},
+        {"tool_call_id": "c3", "is_error": None},
+    ]
+    assert churn.fail_counts(calls, results) == (1, 2)
+
+
+def test_fail_signal_note_only_when_coverage_is_partial():
+    assert churn.fail_signal_note(10, 10) is None
+    note = churn.fail_signal_note(3, 10)
+    assert "3/10 calls" in note and "7" in note
+
+
 def test_median():
     assert churn.median([]) == 0.0
     assert churn.median([5]) == 5
@@ -172,7 +189,10 @@ def test_churn_query_envelope_and_ordering(db):
     meta = result["meta"]
     assert set(meta) == {
         "gap", "sessions_scanned", "sessions_with_calls", "median_churn",
+        "calls_scanned", "calls_measured", "fail_signal_note",
     }
+    # The archive judges every call it has a result for; here that is the failure.
+    assert (meta["calls_scanned"], meta["calls_measured"]) == (5, 1)
     assert meta["gap"] == 120.0
     assert meta["sessions_scanned"] == 2
     assert meta["sessions_with_calls"] == 2
@@ -227,6 +247,35 @@ def test_format_churn_table_known_envelope():
         lines[-1]
         == "sessions scanned: 3  |  with tool calls: 1  |  median churn: 2.50"
     )
+
+
+def test_format_churn_table_marks_an_unjudged_session():
+    """0 measured calls prints ``?``, never a measured-looking 0.0%."""
+    result = {
+        "name": "01_churn",
+        "meta": {
+            "gap": 120.0,
+            "sessions_scanned": 2,
+            "sessions_with_calls": 2,
+            "median_churn": 1.5,
+            "calls_scanned": 6,
+            "calls_measured": 4,
+            "fail_signal_note": churn.fail_signal_note(4, 6),
+        },
+        "rows": [
+            {"session_id": "judged", "project": "p", "total": 4, "sequences": 2,
+             "fail_count": 1, "fail_ratio": 0.25, "churn": 2.5,
+             "measured_calls": 4},
+            {"session_id": "blind", "project": "p", "total": 2, "sequences": 1,
+             "fail_count": 0, "fail_ratio": 0.0, "churn": 1.0,
+             "measured_calls": 0},
+        ],
+    }
+    lines = format_churn_table(result, top=20).splitlines()
+    assert " 25.0%" in lines[2]
+    assert lines[3].endswith("    1.00") and "0.0%" not in lines[3]
+    assert lines[3].split()[-2] == "?"
+    assert lines[-1] == "fail signal on 4/6 calls; the other 2 carry no result text and count as non-failing"
 
 
 def test_format_churn_table_empty_rows():

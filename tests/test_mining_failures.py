@@ -12,8 +12,30 @@ from agent_audit.mining.failures import (
     _example,
     classify_error,
     failures_query,
+    looks_like_error,
 )
 from agent_audit.models import Message, Session, ToolCall, ToolResult
+
+
+@pytest.mark.parametrize(
+    "content,is_error",
+    [
+        ("Exit code 1\nls: no such file", True),
+        ("exit code: 127", True),
+        ("Exit code 0\nall good", False),          # a zero exit is a success
+        ("<tool_use_error>File has not been read</tool_use_error>", True),
+        ("API Error: 500 Internal Server Error", True),
+        ("The user doesn't want to proceed with this tool use", True),
+        ("socket hang up", True),
+        ("total 24\ndrwxr-xr-x  7 agent staff", False),
+        ("the build printed exit code 1 somewhere below", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_looks_like_error(content, is_error):
+    """The mirror's fail signal: ported from the Step-1 probe (p=1.000/r=0.989)."""
+    assert looks_like_error(content) is is_error
 
 
 @pytest.mark.parametrize(

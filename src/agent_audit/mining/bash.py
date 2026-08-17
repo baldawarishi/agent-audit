@@ -25,7 +25,7 @@ import re
 import shlex
 from typing import Any
 
-from .source import SessionSource
+from .source import SessionSource, fail_signal
 
 # Matched against tool_name.lower(); evidence-backed, deliberately not a
 # generic ``*shell*`` match (KillShell / run_experiment are not runners).
@@ -33,8 +33,8 @@ _BASH_TOOL_NAMES = frozenset(
     {"bash", "run_shell_command", "local_shell_call", "exec_command"}
 )
 
-# Printed and stored verbatim wherever ``fail_rate`` comes back ``None``.
-NO_FAIL_SIGNAL = "fail_rate unknown: source carries no is_error flag (Step 4 backfills)"
+# Printed and stored verbatim when no bash call at all could be judged.
+NO_FAIL_SIGNAL = "fail_rate unknown: no bash call in this source reports is_error"
 
 # Wrapper words: the real subcommand is the next token after these.
 _WRAPPERS = frozenset({"sudo", "env", "time", "exec", "nohup", "command"})
@@ -110,15 +110,27 @@ def first_token(command: str | None) -> str:
     return ""
 
 
-def _fail_rate(entry: dict, known: bool) -> float | None:
-    """Failing-calls / calls, or ``None`` when the source has no fail signal.
+def _fail_rate(entry: dict) -> float | None:
+    """Failing-calls / calls, or ``None`` when no call in the row was judged.
 
     Unknown must stay ``None``: a computed-looking ``0.0`` would read as
-    "measured, nothing failed" (see ``NO_FAIL_SIGNAL``).
+    "measured, nothing failed" (see ``fail_signal_note``).
     """
-    if not known:
+    if not entry["measured"]:
         return None
     return entry["fail"] / entry["count"] if entry["count"] else 0.0
+
+
+def fail_signal_note(measured: int, total: int) -> str | None:
+    """Name the fail-signal coverage; ``None`` when every bash call was judged."""
+    if measured >= total:
+        return None
+    if measured == 0:
+        return NO_FAIL_SIGNAL
+    return (
+        f"fail% measured on {measured}/{total} bash calls; the rest carry no "
+        "result text, so their rows are lower bounds (or print ?)"
+    )
 
 
 def bash_subcommands_query(db: SessionSource) -> dict:
@@ -127,16 +139,17 @@ def bash_subcommands_query(db: SessionSource) -> dict:
     One bash-family ``tool_call`` contributes exactly one to its
     subcommand's ``count`` (per-call tally -- distinct from Step-4's
     per-*result* tally). A call is "failing" if it has *any* ``is_error``
-    result, so ``fail_rate`` is failing-calls / calls -- unless the source
-    never reports ``is_error`` at all (the AgentsView mirror), in which case
-    every ``fail_rate`` is ``None`` and ``meta`` says why. ``rows`` is sorted
+    result, so ``fail_rate`` is failing-calls / calls -- but only for rows
+    where the source judged at least one call; a row whose calls all come
+    back unknown (opencode/antigravity carry no result text) reports
+    ``None``, and ``meta`` states the fleet-wide coverage. ``rows`` is sorted
     count-descending, ties broken by ``subcommand`` ascending, and is
     **not** truncated -- top-N is a CLI presentation concern.
     """
     sessions = db.get_all_sessions()
     agg: dict[str, dict] = {}
     bash_calls = 0
-    fail_signal = False
+    measured_calls = 0
 
     for session in sessions:
         sid = session["id"]
@@ -151,23 +164,17 @@ def bash_subcommands_query(db: SessionSource) -> dict:
             bash_calls += 1
             call_sub[c["id"]] = sub
             entry = agg.setdefault(
-                sub, {"count": 0, "sessions": set(), "fail": 0}
+                sub, {"count": 0, "sessions": set(), "fail": 0, "measured": 0}
             )
             entry["count"] += 1
             entry["sessions"].add(sid)
         if not call_sub:
             continue
         results = db.get_tool_results_for_session(sid)
-        # One non-None ``is_error`` anywhere means the source can measure
-        # fail_rate; all-None (the mirror) means it cannot.
-        fail_signal = fail_signal or any(
-            r.get("is_error") is not None for r in results
-        )
-        failing = {
-            r.get("tool_call_id")
-            for r in results
-            if r.get("is_error") and r.get("tool_call_id") in call_sub
-        }
+        measured, failing = fail_signal(results, call_sub)
+        measured_calls += len(measured)
+        for cid in measured:
+            agg[call_sub[cid]]["measured"] += 1
         for cid in failing:
             agg[call_sub[cid]]["fail"] += 1
 
@@ -179,7 +186,8 @@ def bash_subcommands_query(db: SessionSource) -> dict:
             "calls_per_session": (
                 e["count"] / len(e["sessions"]) if e["sessions"] else 0.0
             ),
-            "fail_rate": _fail_rate(e, fail_signal),
+            "fail_rate": _fail_rate(e),
+            "measured_calls": e["measured"],
         }
         for sub, e in agg.items()
     ]
@@ -189,9 +197,10 @@ def bash_subcommands_query(db: SessionSource) -> dict:
         "meta": {
             "sessions_scanned": len(sessions),
             "bash_calls": bash_calls,
+            "measured_calls": measured_calls,
             "distinct_subcommands": len(agg),
-            "fail_rate_known": fail_signal,
-            "fail_rate_note": None if fail_signal else NO_FAIL_SIGNAL,
+            "fail_rate_known": measured_calls == bash_calls,
+            "fail_rate_note": fail_signal_note(measured_calls, bash_calls),
         },
         "rows": rows,
     }

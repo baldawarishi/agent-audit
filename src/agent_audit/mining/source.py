@@ -12,8 +12,11 @@ is unique while ``(session_id, tool_use_id)`` is not.
 
 from __future__ import annotations
 
+from collections.abc import Container
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+from .failures import looks_like_error
 
 DEFAULT_MIRROR_PATH = Path.home() / ".agentsview" / "sessions.duckdb"
 
@@ -35,6 +38,35 @@ class SessionSource(Protocol):
 def _iso(value: Any) -> Any:
     """DuckDB hands back ``datetime``; ``churn.parse_ts`` wants ISO text."""
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def error_flag(content: str | None) -> bool | None:
+    """The mirror's per-call fail signal: read the text, or admit ignorance.
+
+    No result text means **unknown**, never ``False`` -- opencode and
+    antigravity carry none at all (Step 1: 0/281, 0/1359 calls).
+    """
+    return looks_like_error(content) if (content or "").strip() else None
+
+
+def fail_signal(
+    results: list[dict], call_ids: Container[Any]
+) -> tuple[set[Any], set[Any]]:
+    """Split result rows into (calls this source judged, calls that failed).
+
+    ``is_error`` is tri-state across the seam: True/False are measurements,
+    ``None`` is "cannot tell" and counts as neither.
+    """
+    measured: set[Any] = set()
+    failing: set[Any] = set()
+    for result in results:
+        cid = result.get("tool_call_id")
+        if cid not in call_ids or result.get("is_error") is None:
+            continue
+        measured.add(cid)
+        if result.get("is_error"):
+            failing.add(cid)
+    return measured, failing
 
 
 def call_id(session_id: str, message_id: Any, call_index: Any) -> str:
@@ -132,17 +164,17 @@ class AgentsViewSource:
         return list(self._calls.get(session_id, ()))
 
     def get_tool_results_for_session(self, session_id: str) -> list[dict]:
-        """Result text per call, with ``is_error`` deliberately left unknown.
+        """Result text per call, with ``is_error`` read out of that text.
 
-        The mirror has no error flag; choosing the text signal is Step 4's
-        call, and a ``False`` here would silently zero ``01_churn``'s fail term.
+        The mirror has no error flag, so the text detector is the signal
+        (Step 4) and ``None`` survives wherever there is no text to read.
         """
         return [
             {
                 "tool_call_id": call["id"],
                 "tool_use_id": call["tool_use_id"],
                 "session_id": session_id,
-                "is_error": None,
+                "is_error": error_flag(call["result_content"]),
                 "content": call["result_content"],
                 "timestamp": call["timestamp"],
             }

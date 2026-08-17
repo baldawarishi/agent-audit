@@ -1295,7 +1295,14 @@ def mine_list():
     "db_path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to sessions.db (default: the archive database).",
+    help="Path to the store (default: per --source).",
+)
+@click.option(
+    "--source",
+    type=click.Choice(["archive", "agentsview"]),
+    default="archive",
+    show_default=True,
+    help="Read the archive database or the AgentsView DuckDB mirror.",
 )
 @click.option(
     "--gap",
@@ -1320,19 +1327,20 @@ def mine_list():
 def mine_churn(
     ctx,
     db_path: Optional[Path],
+    source: str,
     gap: float,
     top: int,
     json_path: Optional[Path],
 ):
     """Rank sessions by tool-call churn (01_churn)."""
     cfg: Config = ctx.obj["config"]
-    db_path = db_path or cfg.db_path
+    db_path = resolve_source_path(source, db_path, cfg)
 
     if not db_path.exists():
-        click.echo("No archive database found. Run 'sync' first.")
+        click.echo(MISSING_SOURCE[source])
         return
 
-    with Database(db_path) as db:
+    with open_session_source(source, db_path) as db:
         result = get_query("churn")(db, gap=gap)
 
     click.echo(format_churn_table(result, top))

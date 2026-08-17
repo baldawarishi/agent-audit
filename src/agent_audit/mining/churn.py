@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..database import Database
+from .source import SessionSource, fail_signal
 
 
 def parse_ts(ts: str | None) -> datetime | None:
@@ -49,18 +49,20 @@ def count_sequences(calls: list[dict], gap_seconds: float) -> int:
     return sequences
 
 
-def fail_count(calls: list[dict], results: list[dict]) -> int:
-    """Count tool calls in this session whose result is flagged is_error.
+def fail_counts(calls: list[dict], results: list[dict]) -> tuple[int, int]:
+    """``(failing calls, calls this source could judge)`` for one session.
 
-    A call with no matching result is not a failure.
+    A call with no matching result is not a failure, and one the source
+    cannot judge (``is_error`` None) is not a failure either -- so churn is
+    a lower bound wherever the fail signal is partial.
     """
-    call_ids = {c["id"] for c in calls}
-    failing = {
-        r.get("tool_call_id")
-        for r in results
-        if r.get("is_error") and r.get("tool_call_id") in call_ids
-    }
-    return len(failing)
+    measured, failing = fail_signal(results, {c["id"] for c in calls})
+    return len(failing), len(measured)
+
+
+def fail_count(calls: list[dict], results: list[dict]) -> int:
+    """Count tool calls in this session whose result is flagged is_error."""
+    return fail_counts(calls, results)[0]
 
 
 def median(values: list[float]) -> float:
@@ -74,7 +76,21 @@ def median(values: list[float]) -> float:
     return (s[mid - 1] + s[mid]) / 2
 
 
-def score_session(session: dict, db: Database, gap_seconds: float) -> dict | None:
+def fail_signal_note(measured: int, total: int) -> str | None:
+    """Name the fail-signal coverage; ``None`` when every call was judged.
+
+    Unjudged calls count as non-failing in the formula (which stays
+    verbatim), so partial coverage understates churn, never inflates it.
+    """
+    if measured >= total:
+        return None
+    return (
+        f"fail signal on {measured}/{total} calls; the other {total - measured} "
+        "carry no result text and count as non-failing"
+    )
+
+
+def score_session(session: dict, db: SessionSource, gap_seconds: float) -> dict | None:
     """Compute churn for one session, or None if it has no tool calls."""
     sid = session["id"]
     calls = db.get_tool_calls_for_session(sid)
@@ -83,7 +99,7 @@ def score_session(session: dict, db: Database, gap_seconds: float) -> dict | Non
         return None
     results = db.get_tool_results_for_session(sid)
     sequences = count_sequences(calls, gap_seconds)
-    fails = fail_count(calls, results)
+    fails, measured = fail_counts(calls, results)
     fail_ratio = fails / total
     return {
         "session_id": sid,
@@ -93,10 +109,11 @@ def score_session(session: dict, db: Database, gap_seconds: float) -> dict | Non
         "fail_count": fails,
         "fail_ratio": fail_ratio,
         "churn": sequences * (1 + fail_ratio),
+        "measured_calls": measured,
     }
 
 
-def churn_query(db: Database, *, gap: float = 120.0) -> dict:
+def churn_query(db: SessionSource, *, gap: float = 120.0) -> dict:
     """Score every session and return the ``{name, meta, rows}`` envelope.
 
     ``rows`` is every session that had tool calls, sorted churn-descending
@@ -109,6 +126,8 @@ def churn_query(db: Database, *, gap: float = 120.0) -> dict:
         if row is not None:
             rows.append(row)
     rows.sort(key=lambda r: r["churn"], reverse=True)
+    calls = sum(r["total"] for r in rows)
+    measured = sum(r["measured_calls"] for r in rows)
     return {
         "name": "01_churn",
         "meta": {
@@ -116,6 +135,9 @@ def churn_query(db: Database, *, gap: float = 120.0) -> dict:
             "sessions_scanned": len(sessions),
             "sessions_with_calls": len(rows),
             "median_churn": median([r["churn"] for r in rows]),
+            "calls_scanned": calls,
+            "calls_measured": measured,
+            "fail_signal_note": fail_signal_note(measured, calls),
         },
         "rows": rows,
     }

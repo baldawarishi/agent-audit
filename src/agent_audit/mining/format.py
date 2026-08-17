@@ -12,7 +12,8 @@ def format_churn_table(result: dict, top: int) -> str:
     """Render the ``01_churn`` envelope as the Step-1 table + footer.
 
     Empty ``rows`` (no scanned session had tool calls) collapses to the
-    single scanned-line.
+    single scanned-line. A partial fail signal earns a footer line naming
+    its coverage (``meta.fail_signal_note``).
     """
     meta = result["meta"]
     rows = result["rows"]
@@ -29,7 +30,8 @@ def format_churn_table(result: dict, top: int) -> str:
         lines.append(
             f"{r['session_id'][:8]:8}  {r['project'][:30]:30}  "
             f"{r['total']:>5}  {r['sequences']:>5}  {r['fail_count']:>5}  "
-            f"{r['fail_ratio'] * 100:>5.1f}%  {r['churn']:>8.2f}"
+            f"{_fail_pct(None if r.get('measured_calls') == 0 else r['fail_ratio'])}"
+            f"  {r['churn']:>8.2f}"
         )
     lines.append(rule)
     lines.append(
@@ -37,6 +39,8 @@ def format_churn_table(result: dict, top: int) -> str:
         f"with tool calls: {meta['sessions_with_calls']}  |  "
         f"median churn: {meta['median_churn']:.2f}"
     )
+    if meta.get("fail_signal_note"):
+        lines.append(meta["fail_signal_note"])
     return "\n".join(lines)
 
 

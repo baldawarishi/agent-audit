@@ -3,7 +3,9 @@
 Deterministically buckets every ``is_error`` tool result so the fleet's
 failure surface is measurable. ``classify_error`` is a pure,
 ordered-first-match classifier; order is load-bearing (``auth``/``not_found``
-must win over the bare ``http_client`` ``400`` rule).
+must win over the bare ``http_client`` ``400`` rule). ``looks_like_error``
+answers the prior question -- *is* this result a failure -- for sources that
+carry result text but no error flag (the AgentsView mirror).
 """
 
 from __future__ import annotations
@@ -11,6 +13,34 @@ from __future__ import annotations
 import re
 
 from ..database import Database
+
+# Ported verbatim from the Step-1 probe, where it scored precision 1.000 /
+# recall 0.989 against our archive's is_error on the joined Claude sessions.
+_EXIT_CODE = re.compile(r"^exit code:? (\d+)", re.I)
+_ERROR_MARKERS = (
+    "<tool_use_error>",
+    "api error:",
+    "the user doesn't want to proceed",
+    "socket hang up",
+    "timeout of ",
+)
+
+
+def looks_like_error(content: str | None) -> bool:
+    """Does this result text report a failure?
+
+    Only ever asked of calls that *have* result text: textless calls are
+    unknown (``is_error=None``), and answering False for them would be a
+    silent claim that nothing failed.
+    """
+    head = (content or "").strip().lower()[:400]
+    if not head:
+        return False
+    exit_code = _EXIT_CODE.match(head)
+    if exit_code:
+        return exit_code.group(1) != "0"
+    return any(marker in head for marker in _ERROR_MARKERS)
+
 
 # First match wins, so auth/not_found precede http_client (401/404 beat 400).
 # Codes use (?<!\.)\b...\b to reject "0xdd68d8d4000" and "3.400", keeping "404.".
