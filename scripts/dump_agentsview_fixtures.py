@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Dump three real AgentsView sessions into offline test fixtures.
+"""Dump five real AgentsView sessions into offline test fixtures.
 
 Writes ``tests/fixtures/agentsview/mirror.json`` (the reviewable source of
 truth) and rebuilds ``mirror.duckdb`` from it, so every later step can test
 against the mirror's real schema with no daemon and no live archive.
+
+One session per shape worth protecting: Claude (Bash + head-anchored errors),
+Codex (``exec_command`` vs the non-shell ``exec``), antigravity (no
+``result_content`` at all), and -- added in Step 5 -- gemini and pi, whose
+failures are a *trailing* exit-code line the head anchor cannot see.
 """
 
 from __future__ import annotations
@@ -20,12 +25,12 @@ OUT_DIR = REPO / "tests" / "fixtures" / "agentsview"
 TABLES = ("sessions", "messages", "tool_calls", "tool_result_events")
 CAP = 1200
 
-# One session per shape worth protecting: Claude (Bash + errors), Codex
-# (exec_command vs the non-shell exec), antigravity (no result_content).
 SESSIONS = (
     "6a5843f9-4c08-40b9-9810-37ab161c0556",
     "codex:019f920d-851a-7fa0-857f-a89931b98a2f",
     "antigravity-cli:83ff1828-0266-4df9-b3ce-2c99e6438619",
+    "gemini:cd1db565-ca0c-400d-aad0-0faaed74369b",
+    "pi:7261bd39-9f0d-45ca-84ee-1e27cd89b833",
 )
 DROPPED = {"messages": ("content", "thinking_text")}
 

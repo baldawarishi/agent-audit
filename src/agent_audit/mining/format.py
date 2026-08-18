@@ -48,15 +48,18 @@ def format_failures_table(result: dict) -> str:
     """Render the ``02_failure_classification`` envelope as a ranked table.
 
     All buckets are printed (there are at most ~7), so no top-N knob.
-    Empty ``rows`` (no error results scanned) collapses to a single line.
+    Empty ``rows`` (no error results scanned) collapses to a single line,
+    which still carries the coverage footers -- "no failures" means nothing
+    without knowing what the source could read.
     """
     meta = result["meta"]
     rows = result["rows"]
     if not rows:
-        return (
+        return "\n".join([
             f"Scanned {meta['sessions_scanned']} sessions; "
-            "no error results found."
-        )
+            "no error results found.",
+            *_failure_footers(meta),
+        ])
 
     header = (
         f"{'bucket':12}  {'count':>6}  {'fail%':>6}  "
@@ -75,9 +78,17 @@ def format_failures_table(result: dict) -> str:
     lines.append(
         f"sessions scanned: {meta['sessions_scanned']}  |  "
         f"with errors: {meta['sessions_with_errors']}  |  "
-        f"total failures: {meta['total_failures']}"
+        f"total failures: {meta['total_failures']}  |  "
+        f"failing calls: {meta.get('failing_calls', meta['total_failures'])}"
     )
+    lines.extend(_failure_footers(meta))
     return "\n".join(lines)
+
+
+def _failure_footers(meta: dict) -> list[str]:
+    """The three coverage notes ``02`` earns, in the order they qualify a count."""
+    keys = ("counting_note", "signal_note", "coverage_note")
+    return [meta[key] for key in keys if meta.get(key)]
 
 
 def _fail_pct(value: float | None) -> str:

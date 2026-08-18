@@ -28,10 +28,17 @@ def _calls(mirror: dict, tool: str) -> list[dict]:
     return [c for c in mirror["rows"]["tool_calls"] if c["tool_name"] == tool]
 
 
-def test_fixture_covers_three_agent_shapes(mirror):
+def test_fixture_covers_five_agent_shapes(mirror):
     assert {s["agent"] for s in mirror["rows"]["sessions"]} == {
-        "claude", "codex", "antigravity-cli",
+        "claude", "codex", "antigravity-cli", "gemini", "pi",
     }
+
+
+def test_gemini_and_pi_failures_are_a_trailing_exit_line(mirror):
+    """Step 5's needles: the code sits below the output, not at the head."""
+    late = [c["result_content"] for c in mirror["rows"]["tool_calls"]
+            if (c["result_content"] or "").rstrip().endswith(("Exit Code: 1", "code 101"))]
+    assert late and not any(t.lower().startswith("exit code") for t in late)
 
 
 def test_tool_calls_carry_no_id_so_the_key_is_tool_use_id(mirror):
